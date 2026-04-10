@@ -1,0 +1,52 @@
+{
+    "name": "flash-cu124",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "runArgs": [
+        "--gpus=all",
+        "--add-host=host.docker.internal:host-gateway"
+    ],
+    "mounts": [
+        "source=${localEnv:HOME}/.codex,target=/root/.codex,type=bind"
+    ],
+    "containerEnv": {
+        "HTTP_PROXY": "http://host.docker.internal:20172",
+        "HTTPS_PROXY": "http://host.docker.internal:20172",
+        "ALL_PROXY": "http://host.docker.internal:20172",
+        "http_proxy": "http://host.docker.internal:20172",
+        "https_proxy": "http://host.docker.internal:20172",
+        "all_proxy": "http://host.docker.internal:20172"
+    },
+    "remoteEnv": {
+        "HTTP_PROXY": "http://host.docker.internal:20172",
+        "HTTPS_PROXY": "http://host.docker.internal:20172",
+        "ALL_PROXY": "http://host.docker.internal:20172",
+        "http_proxy": "http://host.docker.internal:20172",
+        "https_proxy": "http://host.docker.internal:20172",
+        "all_proxy": "http://host.docker.internal:20172"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "openai.chatgpt",
+                "llvm-vs-code-extensions.vscode-clangd",
+                "ms-vscode.cmake-tools",
+                "ms-vscode.cpptools",
+                "ms-python.python"
+            ],
+            "settings": {
+                "clangd.path": "/usr/bin/clangd",
+                "cmake.configureOnOpen": false,
+                "cmake.generator": "Ninja",
+                "cmake.configureSettings": {
+                    "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc",
+                    "CUDAToolkit_ROOT": "/usr/local/cuda",
+                    "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                },
+                "C_Cpp.intelliSenseEngine": "disabled"
+            }
+        }
+    },
+    "remoteUser": "root"
+}

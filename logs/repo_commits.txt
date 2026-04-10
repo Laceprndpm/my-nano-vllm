@@ -1,0 +1,7 @@
+===== tiny-flash-attention =====
+dacda43160add8ed05c43b943b40787606a23f2f
+===== LeetCUDA =====
+4cf743bdb99d5dc06aecc66de61eb4720fe4e826
+===== flash-attention =====
+060c9188beec3a8b62b33a3bfa6d5d2d44975fab
+v2.8.3
