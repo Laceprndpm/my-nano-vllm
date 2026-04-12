@@ -1,0 +1,23 @@
+CompileFlags:
+  CompilationDatabase: build
+
+---
+If:
+  PathMatch: '.*\.(cu|cuh|cc|cpp|h|hpp)$'
+CompileFlags:
+  Add:
+    - -I/usr/include/python3.10
+    - -I/usr/local/lib/python3.10/dist-packages/torch/include
+    - -I/usr/local/lib/python3.10/dist-packages/torch/include/torch/csrc/api/include
+    - -I/usr/local/cuda-12.4/include
+    - -I/usr/local/cuda-12.4/include/cute
+  Remove:
+    - --generate-code=*
+    - -gencode=*
+    - -forward-unknown-to-host-compiler
+    - -Xcompiler
+    - -Xptxas
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None

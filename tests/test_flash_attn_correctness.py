@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-torch.manual_seed(0)
+torch.manual_seed(514)
 
 DEVICE = "cuda"
 DTYPE = torch.float16
@@ -42,5 +42,6 @@ def run_case(B, H, N, D):
 
 
 if __name__ == "__main__":
-    run_case(1, 8, 128, 64)
-    run_case(1, 8, 512, 64)
+    run_case(1, 8,  128, 64)
+    run_case(1, 8,  512, 64)
+    run_case(1, 8, 1024, 64)
