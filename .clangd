@@ -10,7 +10,7 @@ CompileFlags:
     - -I/usr/local/lib/python3.10/dist-packages/torch/include
     - -I/usr/local/lib/python3.10/dist-packages/torch/include/torch/csrc/api/include
     - -I/usr/local/cuda-12.4/include
-    - -I/usr/local/cuda-12.4/include/cute
+    - -I/workspaces/fa2-project/deps/cutlass/include
   Remove:
     - --generate-code=*
     - -gencode=*

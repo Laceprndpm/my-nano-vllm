@@ -13,6 +13,7 @@
 #include <torch/extension.h>
 #include <torch/types.h>
 #include <vector>
+using namespace cute;
 #define HALF2(value) (reinterpret_cast<half2 *>(&(value))[0])
 #define FLOAT4(x) (reinterpret_cast<float4 *>(&(x))[0])
 
@@ -142,7 +143,7 @@ __global__ void gemm_simple(T *Cptr, const T *Aptr, const T *Bptr, int m, int n,
 
   int num_tile_k = size<2>(gA);
 #pragma unroll 1
-  for (int itile = 0; itile < num_tile_k; ++itle) {
+  for (int itile = 0; itile < num_tile_k; ++itile) {
     cute::copy(tAgA(_, _, _, itile), tArA);
     cute::copy(tBgB(_, _, _, itile), tBrB);
 

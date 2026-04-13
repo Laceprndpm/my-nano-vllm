@@ -1,5 +1,6 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <cute/tensor.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -264,11 +265,159 @@ void print_result(const std::string &name, int M, int N, int K,
   }
   std::cout << std::defaultfloat << "\n";
 }
+using namespace cute;
+
+template <typename T, typename U, int kTileM, int kTileN, int kTileK,
+          typename TiledMMA>
+__global__ void gemm_simple(T *Cptr, const U *Aptr, const U *Bptr, int m, int n,
+                            int k) {
+  Tensor A = make_tensor(make_gmem_ptr(Aptr), make_shape(m, k),
+                         make_stride(k, Int<1>{}));
+  Tensor B = make_tensor(make_gmem_ptr(Bptr), make_shape(n, k),
+                         make_stride(k, Int<1>{}));
+  Tensor C = make_tensor(make_gmem_ptr(Cptr), make_shape(m, n),
+                         make_stride(n, Int<1>{}));
+
+  int ix = blockIdx.x;
+  int iy = blockIdx.y;
+
+  Tensor gA =
+      local_tile(A, make_tile(Int<kTileM>{}, Int<kTileK>{}), make_coord(iy, _));
+  Tensor gB =
+      local_tile(B, make_tile(Int<kTileN>{}, Int<kTileK>{}), make_coord(ix, _));
+  Tensor gC = local_tile(C, make_tile(Int<kTileM>{}, Int<kTileN>{}),
+                         make_coord(iy, ix));
+  //  gA(kTileM, kTileK, num_tile_k)
+  //  gB(kTileN, kTileK, num_tile_k)
+  //  gC(kTileM, kTileN)
+
+  TiledMMA tiled_mma;
+  auto thr_mma = tiled_mma.get_slice(threadIdx.x);
+  auto tAgA = thr_mma.partition_A(gA); // (MMA, MMA_M, MMA_K, num_tile_k)
+  auto tBgB = thr_mma.partition_B(gB); // (MMA, MMA_N, MMA_K, num_tile_k)
+  auto tCgC = thr_mma.partition_C(gC); // (MMA, MMA_M, MMA_N)
+
+  auto tArA = thr_mma.partition_fragment_A(gA(_, _, 0)); // (MMA, MMA_M, MMA_K)
+  auto tBrB = thr_mma.partition_fragment_B(gB(_, _, 0)); // (MMA, MMA_N, MMA_K)
+  auto tCrC = thr_mma.partition_fragment_C(gC(_, _));    // (MMA, MMA_M, MMA_N)
+
+  clear(tCrC);
+
+  int num_tile_k = size<2>(gA);
+#pragma unroll 1
+  for (int itile = 0; itile < num_tile_k; ++itile) {
+    cute::copy(tAgA(_, _, _, itile), tArA);
+    cute::copy(tBgB(_, _, _, itile), tBrB);
+
+    cute::gemm(tiled_mma, tCrC, tArA, tBrB, tCrC);
+  }
+
+  cute::copy(tCrC, tCgC);
+}
+
+BenchmarkResult run_hgemm_cute(int M, int N, int K, int warmup, int iters,
+                               bool verify) {
+  using T = float;
+  using U = half;
+  // This MMA config matches the launch pattern you gave.
+  using mma_op = SM80_16x8x16_F32F16F16F32_TN;
+  using mma_traits = MMA_Traits<mma_op>;
+  using mma_atom = MMA_Atom<mma_traits>;
+  using MMA =
+      decltype(make_tiled_mma(mma_atom{}, make_layout(Shape<_4, _4, _1>{}),
+                              make_layout(Shape<_1, _2, _1>{})));
+
+  // For this MMA config, use a matching CTA tile.
+  constexpr int kTileM = 64;
+  constexpr int kTileN = 64;
+  constexpr int kTileK = 16;
+
+  if (M % kTileM != 0 || N % kTileN != 0 || K % kTileK != 0) {
+    std::cerr << "[hgemm_cute] shape not supported: require "
+              << "M%" << kTileM << "==0, N%" << kTileN << "==0, K%" << kTileK
+              << "==0\n";
+    return {-1.f, -1.f, -1.f};
+  }
+
+  size_t bytes_c = static_cast<size_t>(M) * N * sizeof(T);
+  size_t bytes_a = static_cast<size_t>(M) * K * sizeof(U);
+  size_t bytes_b = static_cast<size_t>(K) * N * sizeof(U);
+
+  std::vector<T> hC(M * N);
+  std::vector<U> hA(M * K), hB(K * N);
+  fill_random_half(hA, 0);
+  fill_random_half(hB, 1);
+
+  T *dC = nullptr;
+  U *dA = nullptr, *dB = nullptr;
+  CHECK_CUDA(cudaMalloc(&dA, bytes_a));
+  CHECK_CUDA(cudaMalloc(&dB, bytes_b));
+  CHECK_CUDA(cudaMalloc(&dC, bytes_c));
+
+  CHECK_CUDA(cudaMemcpy(dA, hA.data(), bytes_a, cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpy(dB, hB.data(), bytes_b, cudaMemcpyHostToDevice));
+
+  dim3 block(size(MMA{}));
+  dim3 grid(N / kTileN, M / kTileM);
+
+  for (int i = 0; i < warmup; ++i) {
+    gemm_simple<T, U, kTileM, kTileN, kTileK, MMA>
+        <<<grid, block>>>(dC, dA, dB, M, N, K);
+  }
+  CHECK_CUDA(cudaGetLastError());
+  CHECK_CUDA(cudaDeviceSynchronize());
+
+  cudaEvent_t start, stop;
+  CHECK_CUDA(cudaEventCreate(&start));
+  CHECK_CUDA(cudaEventCreate(&stop));
+
+  CHECK_CUDA(cudaEventRecord(start));
+  for (int i = 0; i < iters; ++i) {
+    gemm_simple<T, U, kTileM, kTileN, kTileK, MMA>
+        <<<grid, block>>>(dC, dA, dB, M, N, K);
+  }
+  CHECK_CUDA(cudaEventRecord(stop));
+  CHECK_CUDA(cudaGetLastError());
+  CHECK_CUDA(cudaEventSynchronize(stop));
+
+  float total_ms = 0.f;
+  CHECK_CUDA(cudaEventElapsedTime(&total_ms, start, stop));
+  float avg_ms = total_ms / iters;
+
+  CHECK_CUDA(cudaMemcpy(hC.data(), dC, bytes_c, cudaMemcpyDeviceToHost));
+
+  float err = -1.f;
+  std::vector<U> thB(hB.size());
+  for (int i = 0; i < K; i++) {
+    for (int j = 0; j < N; j++) {
+      thB[i * N + j] = hB[i + j * K];
+    }
+  }
+  if (verify) {
+    std::vector<float> hRef = cpu_hgemm_ref(hA, thB, M, N, K);
+    std::vector<float> hC_f(M * N);
+    for (size_t i = 0; i < hC.size(); ++i) {
+      hC_f[i] = hC[i];
+    }
+    err = max_abs_diff(hC_f, hRef);
+  }
+
+  double flops = 2.0 * static_cast<double>(M) * N * K;
+  float tflops = static_cast<float>(flops / (avg_ms * 1e-3) / 1e12);
+
+  CHECK_CUDA(cudaEventDestroy(start));
+  CHECK_CUDA(cudaEventDestroy(stop));
+  CHECK_CUDA(cudaFree(dA));
+  CHECK_CUDA(cudaFree(dB));
+  CHECK_CUDA(cudaFree(dC));
+
+  return {avg_ms, tflops, err};
+}
 
 int main(int argc, char **argv) {
   if (argc < 2) {
     std::cerr << "Usage:\n"
-              << "  " << argv[0] << " <tile> <M> <N> <K>\n"
+              << "  " << argv[0] << " <hgemm|hgemm_cute> <M> <N> <K>\n"
               << "  " << argv[0] << " all\n";
     return 1;
   }
@@ -302,11 +451,26 @@ int main(int argc, char **argv) {
         print_result("hgemm_tile", M, N, K, r, verify);
       }
     }
+
+    std::cout << "\n==== hgemm_cute ====\n";
+    for (auto [M, N, K] : cases) {
+      auto r = run_hgemm_cute(M, N, K, warmup, iters, verify);
+      if (r.avg_ms < 0.f) {
+        std::cout << std::left << std::setw(16) << "hgemm_cute" << " | "
+                  << "M=" << std::setw(5) << M << " "
+                  << "N=" << std::setw(5) << N << " "
+                  << "K=" << std::setw(5) << K << " | "
+                  << "unsupported by current tile\n";
+      } else {
+        print_result("hgemm_cute", M, N, K, r, verify);
+      }
+    }
+
     return 0;
   }
 
   if (argc != 5) {
-    std::cerr << "Usage: " << argv[0] << " <tile> <M> <N> <K>\n";
+    std::cerr << "Usage: " << argv[0] << " <hgemm|hgemm_cute> <M> <N> <K>\n";
     return 1;
   }
 
@@ -314,13 +478,18 @@ int main(int argc, char **argv) {
   int N = std::atoi(argv[3]);
   int K = std::atoi(argv[4]);
 
-  if (mode == "tile") {
+  if (mode == "hgemm") {
     auto r = run_hgemm_tile(M, N, K, warmup, iters, verify);
     if (r.avg_ms < 0.f)
       return 2;
     print_result("hgemm_tile", M, N, K, r, verify);
+  } else if (mode == "hgemm_cute") {
+    auto r = run_hgemm_cute(M, N, K, warmup, iters, verify);
+    if (r.avg_ms < 0.f)
+      return 2;
+    print_result("hgemm_cute", M, N, K, r, verify);
   } else {
-    std::cerr << "kernel must be tile or all\n";
+    std::cerr << "kernel must be hgemm, hgemm_cute, or all\n";
     return 1;
   }
 
