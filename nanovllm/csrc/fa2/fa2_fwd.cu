@@ -1,12 +1,18 @@
 #include <torch/extension.h>
+#include <vector>
 
-torch::Tensor fa2_fwd_cuda(
+std::vector<torch::Tensor> flash_attention_v2_cutlass(
+    torch::Tensor q,
+    torch::Tensor k,
+    torch::Tensor v,
+    bool is_causal,
+    float softmax_scale);
+
+std::vector<torch::Tensor> fa2_fwd_cuda(
     torch::Tensor q,
     torch::Tensor k,
     torch::Tensor v,
     bool causal,
     double softmax_scale) {
-  TORCH_CHECK(false,
-              "Handwritten CUDA FA2 kernel is not implemented yet. "
-              "This extension scaffold is ready and wired via torch.utils.cpp_extension.");
+  return flash_attention_v2_cutlass(q, k, v, causal, static_cast<float>(softmax_scale));
 }

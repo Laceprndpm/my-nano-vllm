@@ -1,13 +1,14 @@
 #include <torch/extension.h>
+#include <vector>
 
-torch::Tensor fa2_fwd_cuda(
+std::vector<torch::Tensor> fa2_fwd_cuda(
     torch::Tensor q,
     torch::Tensor k,
     torch::Tensor v,
     bool causal,
     double softmax_scale);
 
-torch::Tensor fa2_fwd(
+std::vector<torch::Tensor> fa2_fwd(
     torch::Tensor q,
     torch::Tensor k,
     torch::Tensor v,

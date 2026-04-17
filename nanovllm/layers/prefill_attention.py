@@ -241,6 +241,20 @@ def _run_cuda_fa2_torch_ext(
     for b, (ql, kl) in enumerate(zip(padded.q_lens, padded.k_lens)):
         if ql == 0 or kl == 0:
             continue
+        # Handwritten kernel is still being hardened; only run on a conservative shape set.
+        if not (
+            causal
+            and ql == kl
+            and ql % 8 == 0
+            and q_pad.size(-1) in (64, 128)
+            and q_pad.size(2) <= 8
+            and q_pad.device.type == "cuda"
+            and q_pad.dtype in (torch.float16, torch.bfloat16)
+        ):
+            raise RuntimeError(
+                f"torch-ext fa2 unsupported shape for now: ql={ql}, kl={kl}, "
+                f"dim={q_pad.size(-1)}, dtype={q_pad.dtype}"
+            )
         q_b = q_pad[b:b + 1, :ql]
         k_b = k_pad[b:b + 1, :kl]
         v_b = v_pad[b:b + 1, :kl]
@@ -251,7 +265,10 @@ def _run_cuda_fa2_torch_ext(
             causal=causal,
             softmax_scale=float(softmax_scale),
         )
-        out_pad[b:b + 1, :ql] = out_b
+        if isinstance(out_b, (tuple, list)):
+            out_pad[b:b + 1, :ql] = out_b[0]
+        else:
+            out_pad[b:b + 1, :ql] = out_b
     return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
 
 
