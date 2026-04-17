@@ -1,0 +1,67 @@
+{
+  "timestamp_utc": "2026-04-17T08:28:08Z",
+  "branch": "master",
+  "latest_commit": {
+    "hash": "684692f",
+    "message": "Save progress on CUDA FA2 integration"
+  },
+  "recent_commits": [
+    {
+      "hash": "684692f",
+      "message": "Save progress on CUDA FA2 integration"
+    },
+    {
+      "hash": "d87e769",
+      "message": "Fix flash-attn correctness test for pytest collection"
+    },
+    {
+      "hash": "1ce9e38",
+      "message": "Scaffold handwritten CUDA FA2 via torch cpp_extension"
+    },
+    {
+      "hash": "8961d82",
+      "message": "Add batch-view prefill adapter path and validation tests"
+    }
+  ],
+  "completed_milestones": [
+    "Prefill batch-view adapter and backend dispatch for cuda_fa2 are in place.",
+    "Torch cpp extension scaffold and FA2 extension loading path are integrated.",
+    "CUTLASS/CUTE-compatible FA2 source set added under nanovllm/csrc/fa2.",
+    "flash-attn correctness script converted to pytest-collected tests."
+  ],
+  "validation": [
+    {
+      "command": "python3 -m pytest -q tests/test_flash_attn_correctness.py",
+      "result": "3 passed"
+    },
+    {
+      "command": "python3 -m pytest -q tests/test_prefill_attention_batch_view.py",
+      "result": "4 passed"
+    },
+    {
+      "command": "NANOVLLM_FA2_USE_TORCH_EXT=1 python3 example.py",
+      "result": "completed generation"
+    },
+    {
+      "command": "numerical check: fa2_fwd vs flash_attn_func",
+      "result": "tight match after layout fix"
+    }
+  ],
+  "workspace": {
+    "untracked": [
+      "deps/",
+      "third_party/"
+    ],
+    "tracked_modifications": []
+  },
+  "open_items": [
+    "Handwritten CUDA FA2 kernel needs further hardening before default enablement.",
+    "Torch-ext launch shape support remains conservative.",
+    "Need broader perf/stability coverage before backend default switch."
+  ],
+  "next_actions": [
+    "Expand shape and head-dim correctness coverage.",
+    "Add long-sequence and multi-batch regression stress tests.",
+    "Define repo policy for deps/ and third_party/ tracking."
+  ]
+}
