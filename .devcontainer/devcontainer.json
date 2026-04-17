@@ -7,9 +7,9 @@
         "--gpus=all",
         "--add-host=host.docker.internal:host-gateway"
     ],
-    "mounts": [
-        "source=${localEnv:HOME}/.codex,target=/root/.codex,type=bind"
-    ],
+    // "mounts": [
+    //     "source=${localEnv:HOME}/.codex,target=/root/.codex,type=bind"
+    // ],
     "containerEnv": {
         "HTTP_PROXY": "http://host.docker.internal:20172",
         "HTTPS_PROXY": "http://host.docker.internal:20172",
