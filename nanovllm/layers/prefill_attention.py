@@ -6,7 +6,9 @@ from dataclasses import dataclass
 import torch
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 
-from nanovllm.layers.cuda_fa2_torch_ext import fa2_fwd as torch_ext_fa2_fwd
+from nanovllm.layers.cuda_fa2_torch_ext import (
+    fa2_varlen_fwd as torch_ext_fa2_varlen_fwd,
+)
 
 
 @dataclass(slots=True)
@@ -219,11 +221,18 @@ def _run_cuda_fa2_torch_ext(
     cu_seqlens_q: torch.Tensor,
     max_seqlen_k: int,
     cu_seqlens_k: torch.Tensor,
+    block_table: torch.Tensor,
     softmax_scale: float,
     causal: bool,
 ) -> torch.Tensor:
-    """手写 CUDA 路径入口（torch.utils 扩展），当前仅脚手架。"""
-    padded = _varlen_to_padded(
+    """手写 CUDA 路径入口（torch.utils 扩展）：优先走 varlen API。"""
+    if q.device.type != "cuda" or k.device.type != "cuda" or v.device.type != "cuda":
+        raise RuntimeError("torch-ext fa2 varlen requires CUDA tensors")
+    if q.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError(f"torch-ext fa2 varlen unsupported dtype: {q.dtype}")
+    if q.size(2) not in (64, 128):
+        raise RuntimeError(f"torch-ext fa2 varlen unsupported head_dim: {q.size(2)}")
+    out = torch_ext_fa2_varlen_fwd(
         q,
         k,
         v,
@@ -231,45 +240,30 @@ def _run_cuda_fa2_torch_ext(
         cu_seqlens_k=cu_seqlens_k,
         max_seqlen_q=max_seqlen_q,
         max_seqlen_k=max_seqlen_k,
+        block_table=block_table,
+        causal=causal,
+        softmax_scale=float(softmax_scale),
     )
+    return out
 
-    q_pad = padded.q_pad * padded.q_valid.unsqueeze(-1).unsqueeze(-1).to(padded.q_pad.dtype)
-    k_pad = padded.k_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.k_pad.dtype)
-    v_pad = padded.v_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.v_pad.dtype)
-    out_pad = torch.zeros_like(q_pad)
 
-    for b, (ql, kl) in enumerate(zip(padded.q_lens, padded.k_lens)):
-        if ql == 0 or kl == 0:
-            continue
-        # Handwritten kernel is still being hardened; only run on a conservative shape set.
-        if not (
-            causal
-            and ql == kl
-            and ql % 8 == 0
-            and q_pad.size(-1) in (64, 128)
-            and q_pad.size(2) <= 8
-            and q_pad.device.type == "cuda"
-            and q_pad.dtype in (torch.float16, torch.bfloat16)
-        ):
-            raise RuntimeError(
-                f"torch-ext fa2 unsupported shape for now: ql={ql}, kl={kl}, "
-                f"dim={q_pad.size(-1)}, dtype={q_pad.dtype}"
-            )
-        q_b = q_pad[b:b + 1, :ql]
-        k_b = k_pad[b:b + 1, :kl]
-        v_b = v_pad[b:b + 1, :kl]
-        out_b = torch_ext_fa2_fwd(
-            q_b,
-            k_b,
-            v_b,
-            causal=causal,
-            softmax_scale=float(softmax_scale),
-        )
-        if isinstance(out_b, (tuple, list)):
-            out_pad[b:b + 1, :ql] = out_b[0]
-        else:
-            out_pad[b:b + 1, :ql] = out_b
-    return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
+def _normalize_block_table_required(
+    *,
+    cu_seqlens_q: torch.Tensor,
+    block_table: torch.Tensor | None,
+) -> torch.Tensor:
+    batch = int(cu_seqlens_q.numel()) - 1
+    if block_table is None:
+        return torch.empty((batch, 0), dtype=torch.int32, device=cu_seqlens_q.device)
+    if block_table.dtype != torch.int32:
+        raise ValueError("block_table must be int32")
+    if block_table.device != cu_seqlens_q.device:
+        raise ValueError("block_table must be on the same device as cu_seqlens_q")
+    if block_table.dim() != 2:
+        raise ValueError("block_table must be rank-2 [batch, num_blocks]")
+    if block_table.size(0) != batch:
+        raise ValueError(f"block_table batch mismatch: expected {batch}, got {block_table.size(0)}")
+    return block_table.contiguous()
 
 
 def run_prefill_attention(
@@ -302,6 +296,10 @@ def run_prefill_attention(
     if _SETTINGS.backend == "cuda_fa2":
         try:
             if os.getenv("NANOVLLM_FA2_USE_TORCH_EXT", "0") == "1":
+                required_block_table = _normalize_block_table_required(
+                    cu_seqlens_q=cu_seqlens_q,
+                    block_table=block_table,
+                )
                 return _run_cuda_fa2_torch_ext(
                     q,
                     k,
@@ -310,6 +308,7 @@ def run_prefill_attention(
                     cu_seqlens_q=cu_seqlens_q,
                     max_seqlen_k=max_seqlen_k,
                     cu_seqlens_k=cu_seqlens_k,
+                    block_table=required_block_table,
                     softmax_scale=softmax_scale,
                     causal=causal,
                 )

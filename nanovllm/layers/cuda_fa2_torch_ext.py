@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Tuple
 
 import torch
+from flash_attn import flash_attn_varlen_func
 from torch.utils.cpp_extension import CUDA_HOME, load
 
 
@@ -85,3 +86,51 @@ def fa2_fwd(
         lse_bsh = lse_bhs.transpose(1, 2).contiguous()
         return out_bshd, lse_bsh
     raise RuntimeError("fa2_fwd extension returned invalid output; expected (out, lse)")
+
+
+def fa2_varlen_fwd(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    block_table: torch.Tensor,
+    causal: bool,
+    softmax_scale: float,
+) -> torch.Tensor:
+    if block_table is None:
+        raise ValueError("block_table is required; pass an empty int32 tensor when no prefix cache")
+    if block_table.dim() != 2:
+        raise ValueError("block_table must be rank-2 [batch, num_blocks]")
+    if block_table.dtype != torch.int32:
+        raise ValueError("block_table must be int32")
+    if not block_table.is_cuda:
+        raise ValueError("block_table must be a CUDA tensor")
+    if cu_seqlens_q.dtype != torch.int32 or cu_seqlens_k.dtype != torch.int32:
+        raise ValueError("cu_seqlens_q/cu_seqlens_k must be int32")
+    if cu_seqlens_q.dim() != 1 or cu_seqlens_k.dim() != 1:
+        raise ValueError("cu_seqlens_q/cu_seqlens_k must be rank-1")
+    if cu_seqlens_q.numel() != cu_seqlens_k.numel():
+        raise ValueError("cu_seqlens_q and cu_seqlens_k must have the same length")
+    batch = int(cu_seqlens_q.numel()) - 1
+    if block_table.size(0) != batch:
+        raise ValueError(f"block_table batch mismatch: expected {batch}, got {block_table.size(0)}")
+
+    block_table_for_fa = None if block_table.numel() == 0 else block_table
+
+    # Placeholder path: keep varlen dataflow complete with flash-attn while handwritten varlen CUDA is in progress.
+    return flash_attn_varlen_func(
+        q,
+        k,
+        v,
+        max_seqlen_q=max_seqlen_q,
+        cu_seqlens_q=cu_seqlens_q,
+        max_seqlen_k=max_seqlen_k,
+        cu_seqlens_k=cu_seqlens_k,
+        softmax_scale=softmax_scale,
+        causal=causal,
+        block_table=block_table_for_fa,
+    )
