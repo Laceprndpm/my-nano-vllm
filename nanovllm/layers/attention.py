@@ -3,7 +3,8 @@ from torch import nn
 import triton
 import triton.language as tl
 
-from flash_attn import flash_attn_varlen_func, flash_attn_with_kvcache
+from flash_attn import flash_attn_with_kvcache
+from nanovllm.layers.prefill_attention import run_prefill_attention
 from nanovllm.utils.context import get_context
 
 
@@ -64,10 +65,18 @@ class Attention(nn.Module):
         if context.is_prefill:
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache
-            o = flash_attn_varlen_func(q, k, v,
-                                       max_seqlen_q=context.max_seqlen_q, cu_seqlens_q=context.cu_seqlens_q,
-                                       max_seqlen_k=context.max_seqlen_k, cu_seqlens_k=context.cu_seqlens_k,
-                                       softmax_scale=self.scale, causal=True, block_table=context.block_tables)
+            o = run_prefill_attention(
+                q,
+                k,
+                v,
+                max_seqlen_q=context.max_seqlen_q,
+                cu_seqlens_q=context.cu_seqlens_q,
+                max_seqlen_k=context.max_seqlen_k,
+                cu_seqlens_k=context.cu_seqlens_k,
+                softmax_scale=self.scale,
+                causal=True,
+                block_table=context.block_tables,
+            )
         else:    # decode
             o = flash_attn_with_kvcache(q.unsqueeze(1), k_cache, v_cache,
                                         cache_seqlens=context.context_lens, block_table=context.block_tables, 

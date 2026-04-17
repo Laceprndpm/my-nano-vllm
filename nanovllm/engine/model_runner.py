@@ -8,6 +8,7 @@ from nanovllm.config import Config
 from nanovllm.engine.sequence import Sequence
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
 from nanovllm.layers.sampler import Sampler
+from nanovllm.layers.prefill_attention import configure_prefill_attention_backend
 from nanovllm.utils.context import set_context, get_context, reset_context
 from nanovllm.utils.loader import load_model
 
@@ -22,6 +23,7 @@ class ModelRunner:
         self.world_size = config.tensor_parallel_size
         self.rank = rank
         self.event = event
+        configure_prefill_attention_backend(config.prefill_attn_backend, config.prefill_fallback_to_flash_attn)
 
         dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
         torch.cuda.set_device(rank)
