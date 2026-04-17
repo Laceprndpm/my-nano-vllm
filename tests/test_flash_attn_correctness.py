@@ -1,3 +1,4 @@
+import pytest
 import torch
 import torch.nn.functional as F
 
@@ -34,14 +35,20 @@ def run_case(B, H, N, D):
     mean_abs_error = diff.mean().item()
     allclose = torch.allclose(out_sdpa, out_fa, atol=1e-2, rtol=1e-2)
 
-    print(f"[B={B}, H={H}, N={N}, D={D}]")
-    print(f"  max_abs_error : {max_abs_error:.6f}")
-    print(f"  mean_abs_error: {mean_abs_error:.6f}")
-    print(f"  allclose      : {allclose}")
-    print()
+    return max_abs_error, mean_abs_error, allclose
 
 
-if __name__ == "__main__":
-    run_case(1, 8,  128, 64)
-    run_case(1, 8,  512, 64)
-    run_case(1, 8, 1024, 64)
+@pytest.mark.parametrize(
+    "B,H,N,D",
+    [
+        (1, 8, 128, 64),
+        (1, 8, 512, 64),
+        (1, 8, 1024, 64),
+    ],
+)
+def test_flash_attn_matches_sdpa(B, H, N, D):
+    max_abs_error, mean_abs_error, allclose = run_case(B, H, N, D)
+    assert allclose, (
+        f"flash-attn mismatch for B={B}, H={H}, N={N}, D={D}: "
+        f"max_abs_error={max_abs_error:.6f}, mean_abs_error={mean_abs_error:.6f}"
+    )
