@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import torch
 from flash_attn import flash_attn_func, flash_attn_varlen_func
+
+from nanovllm.layers.cuda_fa2_torch_ext import fa2_fwd as torch_ext_fa2_fwd
 
 
 @dataclass(slots=True)
@@ -207,6 +210,51 @@ def _run_cuda_fa2_placeholder(
     return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
 
 
+def _run_cuda_fa2_torch_ext(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    max_seqlen_q: int,
+    cu_seqlens_q: torch.Tensor,
+    max_seqlen_k: int,
+    cu_seqlens_k: torch.Tensor,
+    softmax_scale: float,
+    causal: bool,
+) -> torch.Tensor:
+    """手写 CUDA 路径入口（torch.utils 扩展），当前仅脚手架。"""
+    padded = _varlen_to_padded(
+        q,
+        k,
+        v,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+    )
+
+    q_pad = padded.q_pad * padded.q_valid.unsqueeze(-1).unsqueeze(-1).to(padded.q_pad.dtype)
+    k_pad = padded.k_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.k_pad.dtype)
+    v_pad = padded.v_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.v_pad.dtype)
+    out_pad = torch.zeros_like(q_pad)
+
+    for b, (ql, kl) in enumerate(zip(padded.q_lens, padded.k_lens)):
+        if ql == 0 or kl == 0:
+            continue
+        q_b = q_pad[b:b + 1, :ql]
+        k_b = k_pad[b:b + 1, :kl]
+        v_b = v_pad[b:b + 1, :kl]
+        out_b = torch_ext_fa2_fwd(
+            q_b,
+            k_b,
+            v_b,
+            causal=causal,
+            softmax_scale=float(softmax_scale),
+        )
+        out_pad[b:b + 1, :ql] = out_b
+    return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
+
+
 def run_prefill_attention(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -236,6 +284,18 @@ def run_prefill_attention(
         )
     if _SETTINGS.backend == "cuda_fa2":
         try:
+            if os.getenv("NANOVLLM_FA2_USE_TORCH_EXT", "0") == "1":
+                return _run_cuda_fa2_torch_ext(
+                    q,
+                    k,
+                    v,
+                    max_seqlen_q=max_seqlen_q,
+                    cu_seqlens_q=cu_seqlens_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_k=cu_seqlens_k,
+                    softmax_scale=softmax_scale,
+                    causal=causal,
+                )
             return _run_cuda_fa2_placeholder(
                 q,
                 k,
