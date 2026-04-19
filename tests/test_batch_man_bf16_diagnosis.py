@@ -41,13 +41,13 @@ def test_fp16_kernel_matches_sdpa_baseline():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
-def test_bf16_kernel_mismatch_is_large_currently():
+def test_bf16_kernel_matches_sdpa_baseline():
     if not torch.cuda.is_bf16_supported():
         pytest.skip("bf16 is not supported on this GPU")
 
     max_abs_error, mean_abs_error, allclose = _run_kernel_vs_sdpa(torch.bfloat16)
 
-    assert (not allclose) and max_abs_error > 0.05, (
-        "expected current bf16 path mismatch to be clearly larger than normal tolerance; "
-        f"got max_abs_error={max_abs_error:.6f}, mean_abs_error={mean_abs_error:.6f}, allclose={allclose}"
+    assert allclose, (
+        "bf16 kernel should remain close to sdpa baseline: "
+        f"max_abs_error={max_abs_error:.6f}, mean_abs_error={mean_abs_error:.6f}"
     )

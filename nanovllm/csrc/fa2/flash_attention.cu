@@ -203,15 +203,32 @@ inline __device__ auto convert_type(Tensor<Engine, Layout> const &tensor) {
 // TODO:
 // https://github.com/NVIDIA/cutlass/issues/802
 // TODO: convert出来后数据是否在寄存器?
-template <typename Fragment>
-inline __device__ auto convert_type_f32_to_f16(Fragment const &acc_fp32) {
-  Tensor acc_fp16 = make_tensor<cute::half_t>(shape(acc_fp32));
+template <typename Elem>
+struct ElemVec2Converter;
+
+template <>
+struct ElemVec2Converter<cutlass::half_t> {
+  using Vec2 = __half2;
+  inline __device__ static Vec2 from_float2(float2 x) { return __float22half2_rn(x); }
+};
+
+template <>
+struct ElemVec2Converter<cutlass::bfloat16_t> {
+  using Vec2 = __nv_bfloat162;
+  inline __device__ static Vec2 from_float2(float2 x) { return __float22bfloat162_rn(x); }
+};
+
+template <typename Elem, typename Fragment>
+inline __device__ auto convert_type_f32_to_elem(Fragment const &acc_fp32) {
+  Tensor acc_elem = make_tensor<Elem>(shape(acc_fp32));
   {
-    Tensor acc_fp32x2 = recast< float2>(acc_fp32);
-    Tensor acc_fp16x2 = recast<__half2>(acc_fp16);
-    for (int i = 0; i < size(acc_fp32x2); ++i) { acc_fp16x2(i) = __float22half2_rn(acc_fp32x2(i)); }
+    Tensor acc_fp32x2 = recast<float2>(acc_fp32);
+    Tensor acc_elem2 = recast<typename ElemVec2Converter<Elem>::Vec2>(acc_elem);
+    for (int i = 0; i < size(acc_fp32x2); ++i) {
+      acc_elem2(i) = ElemVec2Converter<Elem>::from_float2(acc_fp32x2(i));
+    }
   }
-  return acc_fp16;
+  return acc_elem;
 }
 
 // Apply the exp to all the elements.
@@ -612,7 +629,7 @@ __global__ void flash_attention_v2_cutlass_kernel(const Params params) {
     // (score AKA rAccScore): QK[M, N] @ V[N, dim]
     // NOTE: DABC: F32F16F16F32, convert D type(F32) to A type(F16)
     // TODO: convert_type目前写死
-    Tensor rP = flash::convert_type_f32_to_f16(rAccScore);
+    Tensor rP = flash::convert_type_f32_to_elem<Element>(rAccScore);
     // NOTE: Convert from layout C to layout A
     Tensor tOrP = make_tensor(rP.data(), flash::convert_layout_rowcol_Aregs<TiledMMA>(scores.layout()));
 
@@ -644,7 +661,7 @@ __global__ void flash_attention_v2_cutlass_kernel(const Params params) {
   }
 
   // Convert acc_o from fp32 to fp16/bf16
-  Tensor rO = flash::convert_type_f32_to_f16(rAccOut);
+  Tensor rO = flash::convert_type_f32_to_elem<Element>(rAccOut);
   // 复用sQ的smem做sO的拷出
   Tensor sO = make_tensor(sQ.data(), typename Kernel_traits::SmemLayoutO{});    // (SMEM_M,SMEM_N)
 
@@ -799,5 +816,3 @@ std::vector<torch::Tensor> flash_attention_v2_cutlass(torch::Tensor q, torch::Te
 
   return {out, softmax_lse};
 }
-
-

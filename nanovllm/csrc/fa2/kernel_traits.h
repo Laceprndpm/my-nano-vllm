@@ -5,6 +5,9 @@
 #include "cutlass/cutlass.h"
 #include "cutlass/layout/layout.h"
 #include <cutlass/numeric_types.h>
+#include <cuda_bf16.h>
+#include <cuda_fp16.h>
+#include <type_traits>
 
 using namespace cute;
 
@@ -18,6 +21,10 @@ struct Flash_kernel_traits {
     using Element = cutlass::half_t;
     static constexpr bool Has_cp_async = false;
 #endif
+    using Element2 = std::conditional_t<
+        std::is_same_v<Element, cutlass::half_t>,
+        __half2,
+        __nv_bfloat162>;
 
     using ElementAccum = float;
     using index_t = int64_t;
@@ -46,6 +53,7 @@ template<int kHeadDim_, int kBlockM_, int kBlockN_, int kNWarps_, typename elem_
          typename Base=Flash_kernel_traits<kHeadDim_, kBlockM_, kBlockN_, kNWarps_, elem_type> >
 struct Flash_fwd_kernel_traits : public Base {
     using Element = typename Base::Element;
+    using Element2 = typename Base::Element2;
     using ElementAccum = typename Base::ElementAccum;
     using index_t = typename Base::index_t;
     static constexpr bool Has_cp_async = Base::Has_cp_async;
