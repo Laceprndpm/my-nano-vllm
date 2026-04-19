@@ -1,11 +1,15 @@
 {
-  "timestamp_utc": "2026-04-19T07:13:31Z",
+  "timestamp_utc": "2026-04-19T07:38:51Z",
   "branch": "master",
   "latest_commit": {
-    "hash": "cf54991",
-    "message": "Add minimal varlen FA2 API contract and integration"
+    "hash": "4005e1c",
+    "message": "Checkpoint before batch_man padding hotfix"
   },
   "recent_commits": [
+    {
+      "hash": "4005e1c",
+      "message": "Checkpoint before batch_man padding hotfix"
+    },
     {
       "hash": "cf54991",
       "message": "Add minimal varlen FA2 API contract and integration"
@@ -13,22 +17,7 @@
     {
       "hash": "7582dd0",
       "message": "Add project status docs"
-    },
-    {
-      "hash": "684692f",
-      "message": "Save progress on CUDA FA2 integration"
-    },
-    {
-      "hash": "d87e769",
-      "message": "Fix flash-attn correctness test for pytest collection"
     }
-  ],
-  "completed_milestones": [
-    "Added minimal varlen FA2 API contract at Python/extension boundary.",
-    "Added varlen API contract tests and docs for human and agent readers.",
-    "Added prefill runtime mode switch via NANOVLLM_FA2_MODE.",
-    "Restored batch_man handwritten batch-view path through torch bind fa2_fwd.",
-    "Kept batch_official and varlen placeholder paths active."
   ],
   "runtime_modes": {
     "env": "NANOVLLM_FA2_MODE",
@@ -37,28 +26,20 @@
       "varlen_man",
       "batch_official",
       "batch_man"
-    ],
-    "current_behavior": {
-      "varlen_official": "active placeholder-backed varlen path",
-      "varlen_man": "placeholder that forwards to varlen_official",
-      "batch_official": "active official batch-view path",
-      "batch_man": "active handwritten batch-view path"
-    }
-  },
-  "workspace": {
-    "untracked": [
-      "deps/",
-      "third_party/"
     ]
   },
+  "hotfix": {
+    "name": "batch_man_pad64_python_hotfix",
+    "active": true,
+    "warning_tag": "[WARNING][FA2_BATCH_MAN_PAD64]",
+    "behavior": "pad each sequence length to multiple of 64 before handwritten batch kernel"
+  },
   "open_items": [
-    "Handwritten CUDA varlen kernel is not wired yet.",
-    "varlen_man is placeholder behavior.",
-    "Need full mode-matrix regression and performance validation."
+    "Handwritten CUDA varlen kernel is pending.",
+    "Kernel-level tail/predicate handling for handwritten batch kernel is incomplete."
   ],
   "next_actions": [
-    "Implement true handwritten CUDA varlen kernel for varlen_man.",
-    "Run complete mode-matrix tests after routing changes settle.",
-    "Finalize policy for deps/ and third_party/ tracking."
+    "Replace Python pad64 hotfix with kernel-level boundary/predicate fixes.",
+    "Continue mode-matrix correctness and quality validation."
   ]
 }
