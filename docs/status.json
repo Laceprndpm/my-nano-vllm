@@ -1,11 +1,19 @@
 {
-  "timestamp_utc": "2026-04-17T08:28:08Z",
+  "timestamp_utc": "2026-04-19T07:13:31Z",
   "branch": "master",
   "latest_commit": {
-    "hash": "684692f",
-    "message": "Save progress on CUDA FA2 integration"
+    "hash": "cf54991",
+    "message": "Add minimal varlen FA2 API contract and integration"
   },
   "recent_commits": [
+    {
+      "hash": "cf54991",
+      "message": "Add minimal varlen FA2 API contract and integration"
+    },
+    {
+      "hash": "7582dd0",
+      "message": "Add project status docs"
+    },
     {
       "hash": "684692f",
       "message": "Save progress on CUDA FA2 integration"
@@ -13,55 +21,44 @@
     {
       "hash": "d87e769",
       "message": "Fix flash-attn correctness test for pytest collection"
-    },
-    {
-      "hash": "1ce9e38",
-      "message": "Scaffold handwritten CUDA FA2 via torch cpp_extension"
-    },
-    {
-      "hash": "8961d82",
-      "message": "Add batch-view prefill adapter path and validation tests"
     }
   ],
   "completed_milestones": [
-    "Prefill batch-view adapter and backend dispatch for cuda_fa2 are in place.",
-    "Torch cpp extension scaffold and FA2 extension loading path are integrated.",
-    "CUTLASS/CUTE-compatible FA2 source set added under nanovllm/csrc/fa2.",
-    "flash-attn correctness script converted to pytest-collected tests."
+    "Added minimal varlen FA2 API contract at Python/extension boundary.",
+    "Added varlen API contract tests and docs for human and agent readers.",
+    "Added prefill runtime mode switch via NANOVLLM_FA2_MODE.",
+    "Restored batch_man handwritten batch-view path through torch bind fa2_fwd.",
+    "Kept batch_official and varlen placeholder paths active."
   ],
-  "validation": [
-    {
-      "command": "python3 -m pytest -q tests/test_flash_attn_correctness.py",
-      "result": "3 passed"
-    },
-    {
-      "command": "python3 -m pytest -q tests/test_prefill_attention_batch_view.py",
-      "result": "4 passed"
-    },
-    {
-      "command": "NANOVLLM_FA2_USE_TORCH_EXT=1 python3 example.py",
-      "result": "completed generation"
-    },
-    {
-      "command": "numerical check: fa2_fwd vs flash_attn_func",
-      "result": "tight match after layout fix"
+  "runtime_modes": {
+    "env": "NANOVLLM_FA2_MODE",
+    "values": [
+      "varlen_official",
+      "varlen_man",
+      "batch_official",
+      "batch_man"
+    ],
+    "current_behavior": {
+      "varlen_official": "active placeholder-backed varlen path",
+      "varlen_man": "placeholder that forwards to varlen_official",
+      "batch_official": "active official batch-view path",
+      "batch_man": "active handwritten batch-view path"
     }
-  ],
+  },
   "workspace": {
     "untracked": [
       "deps/",
       "third_party/"
-    ],
-    "tracked_modifications": []
+    ]
   },
   "open_items": [
-    "Handwritten CUDA FA2 kernel needs further hardening before default enablement.",
-    "Torch-ext launch shape support remains conservative.",
-    "Need broader perf/stability coverage before backend default switch."
+    "Handwritten CUDA varlen kernel is not wired yet.",
+    "varlen_man is placeholder behavior.",
+    "Need full mode-matrix regression and performance validation."
   ],
   "next_actions": [
-    "Expand shape and head-dim correctness coverage.",
-    "Add long-sequence and multi-batch regression stress tests.",
-    "Define repo policy for deps/ and third_party/ tracking."
+    "Implement true handwritten CUDA varlen kernel for varlen_man.",
+    "Run complete mode-matrix tests after routing changes settle.",
+    "Finalize policy for deps/ and third_party/ tracking."
   ]
 }

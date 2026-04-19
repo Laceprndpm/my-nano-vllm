@@ -1,37 +1,38 @@
 # Project Status
 
-Last updated (UTC): 2026-04-17T08:28:08Z
+Last updated (UTC): 2026-04-19T07:13:31Z
 
 ## Snapshot
 - Branch: `master`
-- Latest commit: `684692f` (`Save progress on CUDA FA2 integration`)
-- Previous commit: `d87e769` (`Fix flash-attn correctness test for pytest collection`)
+- Latest commit: `cf54991` (`Add minimal varlen FA2 API contract and integration`)
+- Previous commit: `7582dd0` (`Add project status docs`)
 
 ## Completed Milestones
-- Added prefill batch-view adapter and backend dispatch for `cuda_fa2` with flash-attn fallback path.
-- Added torch cpp extension scaffold and integrated FA2 extension loading pipeline.
-- Landed CUTLASS/CUTE-compatible handwritten FA2 source set under `nanovllm/csrc/fa2`.
-- Fixed test collection for flash-attn correctness by converting script-style checks to pytest tests.
+- Added minimal varlen FA2 API contract at Python/extension boundary.
+- Added varlen API contract tests and docs for agent/human readers.
+- Added runtime mode switch in prefill path via `NANOVLLM_FA2_MODE`.
+- Restored handwritten batch-view path (`batch_man`) using torch bind `fa2_fwd`.
+- Kept official batch-view path (`batch_official`) and varlen placeholders.
 
-## Validation Summary
-- `python3 -m pytest -q tests/test_flash_attn_correctness.py` -> `3 passed`
-- `python3 -m pytest -q tests/test_prefill_attention_batch_view.py` -> `4 passed`
-- `python3 example.py` with `NANOVLLM_FA2_USE_TORCH_EXT=1` completed generation successfully.
-- Numerical check (`fa2_fwd` vs `flash_attn_func`) passed with tight match after layout fix.
+## Runtime Modes (Current)
+- `varlen_official`: enabled, routes via varlen wrapper (placeholder backend).
+- `varlen_man`: placeholder, currently forwards to `varlen_official`.
+- `batch_official`: enabled, batch-view via official flash-attn path.
+- `batch_man`: enabled, batch-view via handwritten torch-bind `fa2_fwd`.
 
 ## Current Workspace State
+- Working tree contains local edits for mode routing + docs + tests updates.
 - Untracked directories remain: `deps/`, `third_party/`.
-- No other tracked-file modifications pending at snapshot time.
 
 ## Open Items / Risks
-- Handwritten CUDA FA2 kernel is integrated but still treated as in-progress hardening work.
-- Shape support is currently conservative in the torch-ext route to avoid unsafe launches.
-- Need broader performance and stability sweep before making CUDA path default.
+- Handwritten CUDA varlen kernel remains pending.
+- `varlen_man` is currently placeholder behavior, not independent kernel path yet.
+- Expanded shape/perf validation should be done after routing stabilization.
 
 ## Next Actions
-1. Expand shape/head-dim coverage and add targeted correctness tests.
-2. Add stress/regression tests for long sequence and multi-head/multi-batch cases.
-3. Decide policy for tracking or ignoring `deps/` and `third_party/` in this repo.
+1. Wire true handwritten CUDA varlen kernel to replace `varlen_man` placeholder.
+2. Run full regression + mode-matrix tests after integration freeze.
+3. Decide repository policy for `deps/` and `third_party/` tracking.
 
 ---
 Update rule:

@@ -7,6 +7,7 @@ import torch
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 
 from nanovllm.layers.cuda_fa2_torch_ext import (
+    fa2_fwd as torch_ext_fa2_fwd,
     fa2_varlen_fwd as torch_ext_fa2_varlen_fwd,
 )
 
@@ -163,7 +164,7 @@ def _padded_to_varlen(padded: torch.Tensor, lens: list[int], cu_seqlens: torch.T
     return out
 
 
-def _run_cuda_fa2_placeholder(
+def _run_cuda_batch_fa2_official(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -175,7 +176,7 @@ def _run_cuda_fa2_placeholder(
     softmax_scale: float,
     causal: bool,
 ) -> torch.Tensor:
-    """CUDA-FA2 占位实现：在 batch 视图下调用 flash-attn FA2 进行前向。"""
+    """官方 batch-view 路径：在 batch 视图下调用 flash-attn FA2 进行前向。"""
     padded = _varlen_to_padded(
         q,
         k,
@@ -212,7 +213,50 @@ def _run_cuda_fa2_placeholder(
     return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
 
 
-def _run_cuda_fa2_torch_ext(
+def _run_cuda_batch_fa2_man(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    max_seqlen_q: int,
+    cu_seqlens_q: torch.Tensor,
+    max_seqlen_k: int,
+    cu_seqlens_k: torch.Tensor,
+    softmax_scale: float,
+    causal: bool,
+) -> torch.Tensor:
+    """手写 CUDA batch-view 路径：逐序列调用 torch bind 自写 kernel。"""
+    padded = _varlen_to_padded(
+        q,
+        k,
+        v,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+    )
+    q_pad = padded.q_pad * padded.q_valid.unsqueeze(-1).unsqueeze(-1).to(padded.q_pad.dtype)
+    k_pad = padded.k_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.k_pad.dtype)
+    v_pad = padded.v_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.v_pad.dtype)
+    out_pad = torch.zeros_like(q_pad)
+    for b, (ql, kl) in enumerate(zip(padded.q_lens, padded.k_lens)):
+        if ql == 0 or kl == 0:
+            continue
+        q_b = q_pad[b:b + 1, :ql]
+        k_b = k_pad[b:b + 1, :kl]
+        v_b = v_pad[b:b + 1, :kl]
+        out_lse = torch_ext_fa2_fwd(
+            q_b,
+            k_b,
+            v_b,
+            causal=causal,
+            softmax_scale=float(softmax_scale),
+        )
+        out_pad[b:b + 1, :ql] = out_lse[0] if isinstance(out_lse, (tuple, list)) else out_lse
+    return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
+
+
+def _run_cuda_varlen_fa2_official(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -225,14 +269,8 @@ def _run_cuda_fa2_torch_ext(
     softmax_scale: float,
     causal: bool,
 ) -> torch.Tensor:
-    """手写 CUDA 路径入口（torch.utils 扩展）：优先走 varlen API。"""
-    if q.device.type != "cuda" or k.device.type != "cuda" or v.device.type != "cuda":
-        raise RuntimeError("torch-ext fa2 varlen requires CUDA tensors")
-    if q.dtype not in (torch.float16, torch.bfloat16):
-        raise RuntimeError(f"torch-ext fa2 varlen unsupported dtype: {q.dtype}")
-    if q.size(2) not in (64, 128):
-        raise RuntimeError(f"torch-ext fa2 varlen unsupported head_dim: {q.size(2)}")
-    out = torch_ext_fa2_varlen_fwd(
+    """官方 varlen 路径：当前通过 flash-attn varlen 占位接口贯通。"""
+    return torch_ext_fa2_varlen_fwd(
         q,
         k,
         v,
@@ -244,7 +282,86 @@ def _run_cuda_fa2_torch_ext(
         causal=causal,
         softmax_scale=float(softmax_scale),
     )
-    return out
+
+
+def _run_cuda_varlen_fa2_man_placeholder(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    max_seqlen_q: int,
+    cu_seqlens_q: torch.Tensor,
+    max_seqlen_k: int,
+    cu_seqlens_k: torch.Tensor,
+    block_table: torch.Tensor,
+    softmax_scale: float,
+    causal: bool,
+) -> torch.Tensor:
+    """手写 CUDA varlen 路径占位：暂时回落到官方 varlen 实现。"""
+    return _run_cuda_varlen_fa2_official(
+        q,
+        k,
+        v,
+        max_seqlen_q=max_seqlen_q,
+        cu_seqlens_q=cu_seqlens_q,
+        max_seqlen_k=max_seqlen_k,
+        cu_seqlens_k=cu_seqlens_k,
+        block_table=block_table,
+        softmax_scale=softmax_scale,
+        causal=causal,
+    )
+
+
+def _run_cuda_fwd_placeholder(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    max_seqlen_q: int,
+    cu_seqlens_q: torch.Tensor,
+    max_seqlen_k: int,
+    cu_seqlens_k: torch.Tensor,
+    softmax_scale: float,
+    causal: bool,
+) -> torch.Tensor:
+    """兼容旧命名的 fwd 占位入口：等价于 batch official 路径。"""
+    return _run_cuda_batch_fa2_official(
+        q,
+        k,
+        v,
+        max_seqlen_q=max_seqlen_q,
+        cu_seqlens_q=cu_seqlens_q,
+        max_seqlen_k=max_seqlen_k,
+        cu_seqlens_k=cu_seqlens_k,
+        softmax_scale=softmax_scale,
+        causal=causal,
+    )
+
+
+def _run_cuda_fa2_placeholder(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    max_seqlen_q: int,
+    cu_seqlens_q: torch.Tensor,
+    max_seqlen_k: int,
+    cu_seqlens_k: torch.Tensor,
+    softmax_scale: float,
+    causal: bool,
+) -> torch.Tensor:
+    """Legacy alias kept for compatibility with existing tests/callers."""
+    return _run_cuda_batch_fa2_official(
+        q,
+        k,
+        v,
+        max_seqlen_q=max_seqlen_q,
+        cu_seqlens_q=cu_seqlens_q,
+        max_seqlen_k=max_seqlen_k,
+        cu_seqlens_k=cu_seqlens_k,
+        softmax_scale=softmax_scale,
+        causal=causal,
+    )
 
 
 def _normalize_block_table_required(
@@ -266,6 +383,16 @@ def _normalize_block_table_required(
     return block_table.contiguous()
 
 
+def _resolve_fa2_mode() -> str:
+    """Resolve FA2 runtime mode."""
+    mode = os.getenv("NANOVLLM_FA2_MODE")
+    if mode:
+        return mode
+    if os.getenv("NANOVLLM_FA2_USE_TORCH_EXT", "0") == "1":
+        return "varlen_official"
+    return "batch_official"
+
+
 def run_prefill_attention(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -280,7 +407,7 @@ def run_prefill_attention(
     block_table: torch.Tensor | None,
 ) -> torch.Tensor:
     """按配置选择 prefill attention 后端，并在需要时执行回退。"""
-    if _SETTINGS.backend == "flash_attn" or block_table is not None:
+    if _SETTINGS.backend == "flash_attn":
         return _direct_flash_attn_prefill(
             q,
             k,
@@ -295,12 +422,10 @@ def run_prefill_attention(
         )
     if _SETTINGS.backend == "cuda_fa2":
         try:
-            if os.getenv("NANOVLLM_FA2_USE_TORCH_EXT", "0") == "1":
-                required_block_table = _normalize_block_table_required(
-                    cu_seqlens_q=cu_seqlens_q,
-                    block_table=block_table,
-                )
-                return _run_cuda_fa2_torch_ext(
+            mode = _resolve_fa2_mode()
+            if mode == "varlen_official":
+                required_block_table = _normalize_block_table_required(cu_seqlens_q=cu_seqlens_q, block_table=block_table)
+                return _run_cuda_varlen_fa2_official(
                     q,
                     k,
                     v,
@@ -312,17 +437,49 @@ def run_prefill_attention(
                     softmax_scale=softmax_scale,
                     causal=causal,
                 )
-            return _run_cuda_fa2_placeholder(
-                q,
-                k,
-                v,
-                max_seqlen_q=max_seqlen_q,
-                cu_seqlens_q=cu_seqlens_q,
-                max_seqlen_k=max_seqlen_k,
-                cu_seqlens_k=cu_seqlens_k,
-                softmax_scale=softmax_scale,
-                causal=causal,
-            )
+            if mode == "varlen_man":
+                required_block_table = _normalize_block_table_required(cu_seqlens_q=cu_seqlens_q, block_table=block_table)
+                return _run_cuda_varlen_fa2_man_placeholder(
+                    q,
+                    k,
+                    v,
+                    max_seqlen_q=max_seqlen_q,
+                    cu_seqlens_q=cu_seqlens_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_k=cu_seqlens_k,
+                    block_table=required_block_table,
+                    softmax_scale=softmax_scale,
+                    causal=causal,
+                )
+            if mode == "batch_official":
+                if block_table is not None and block_table.numel() > 0:
+                    raise RuntimeError("batch_official mode does not support non-empty block_table")
+                return _run_cuda_batch_fa2_official(
+                    q,
+                    k,
+                    v,
+                    max_seqlen_q=max_seqlen_q,
+                    cu_seqlens_q=cu_seqlens_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_k=cu_seqlens_k,
+                    softmax_scale=softmax_scale,
+                    causal=causal,
+                )
+            if mode == "batch_man":
+                if block_table is not None and block_table.numel() > 0:
+                    raise RuntimeError("batch_man mode does not support non-empty block_table")
+                return _run_cuda_batch_fa2_man(
+                    q,
+                    k,
+                    v,
+                    max_seqlen_q=max_seqlen_q,
+                    cu_seqlens_q=cu_seqlens_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_k=cu_seqlens_k,
+                    softmax_scale=softmax_scale,
+                    causal=causal,
+                )
+            raise ValueError(f"unsupported NANOVLLM_FA2_MODE: {mode}")
         except Exception:
             if _SETTINGS.fallback_to_flash_attn:
                 return _direct_flash_attn_prefill(

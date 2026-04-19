@@ -1,20 +1,36 @@
-# Varlen API Design (NanoVLLM)
+# Varlen/Batch FA2 Runtime Design (NanoVLLM)
 
 ## Human Readable
 
 ### Goal
-Add a minimal varlen forward API at Python + extension boundary, aligned with flash-attn2 core semantics, but intentionally small for this project.
+Keep both batch-view and varlen FA2 paths available behind one runtime mode switch, while preserving a small-project API surface.
 
 ### Design Choices
+- Runtime mode switch: `NANOVLLM_FA2_MODE`.
+- Supported mode values:
+  - `varlen_official`
+  - `varlen_man`
+  - `batch_official`
+  - `batch_man`
 - Keep only inference-focused arguments: `q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, block_table, causal, softmax_scale`.
 - Exclude advanced options: dropout/window/alibi/softcap/deterministic/attn-prob outputs.
-- `block_table` is required in the API contract.
+- `block_table` is required for varlen modes.
 - If no prefix cache is used, pass an empty CUDA `int32` tensor with shape `(batch, 0)`.
 
 ### Current Implementation State
-- Python varlen API is implemented and wired into prefill torch-ext path.
-- C++ extension symbol `fa2_varlen_fwd` exists as a placeholder entrypoint.
-- Runtime varlen execution currently routes to `flash_attn_varlen_func` as a placeholder while handwritten CUDA varlen kernel is pending.
+- `batch_official`: batch-view + official flash-attn batch kernel path.
+- `batch_man`: batch-view + handwritten torch-bind `fa2_fwd` path.
+- `varlen_official`: varlen API path via `fa2_varlen_fwd` (current runtime is flash-attn varlen placeholder).
+- `varlen_man`: placeholder path; currently forwards to `varlen_official`.
+- C++ extension symbol `fa2_varlen_fwd` remains placeholder for handwritten varlen CUDA kernel.
+
+### Mode Matrix
+| Mode | Function | Current backend |
+|---|---|---|
+| `varlen_official` | `_run_cuda_varlen_fa2_official` | `flash_attn_varlen_func` placeholder via wrapper |
+| `varlen_man` | `_run_cuda_varlen_fa2_man_placeholder` | forwards to `varlen_official` |
+| `batch_official` | `_run_cuda_batch_fa2_official` | `flash_attn_func` per-sequence batch-view |
+| `batch_man` | `_run_cuda_batch_fa2_man` | handwritten torch bind `fa2_fwd` per-sequence batch-view |
 
 ### API
 ```python
@@ -41,12 +57,23 @@ def fa2_varlen_fwd(
 ## Agent Readable
 
 ```yaml
-api_name: fa2_varlen_fwd
-layer: nanovllm.layers.cuda_fa2_torch_ext
+api_name: fa2_runtime_modes
+layer: nanovllm.layers.prefill_attention
 status:
-  python: implemented
-  cpp_symbol: implemented_placeholder
-  cuda_kernel: pending
+  mode_switch: implemented
+  varlen_cpp_symbol: implemented_placeholder
+  handwritten_varlen_cuda: pending
+mode_env:
+  name: NANOVLLM_FA2_MODE
+  values:
+    - varlen_official
+    - varlen_man
+    - batch_official
+    - batch_man
+  default_resolution:
+    - if NANOVLLM_FA2_MODE is set: use it
+    - else if NANOVLLM_FA2_USE_TORCH_EXT==1: varlen_official
+    - else: batch_official
 inputs:
   q:
     shape: [total_q, nheads_q, headdim]
@@ -86,8 +113,11 @@ outputs:
   out:
     shape: [total_q, nheads_q, headdim]
 routing:
-  current_runtime: flash_attn_varlen_func_placeholder
-  target_runtime: handwritten_cuda_varlen_kernel
+  varlen_official: flash_attn_varlen_func_placeholder
+  varlen_man: varlen_official_placeholder_forward
+  batch_official: flash_attn_func_batch_view
+  batch_man: handwritten_fa2_fwd_batch_view
+  target_varlen_man: handwritten_cuda_varlen_kernel
 excluded_features:
   - dropout
   - return_attn_probs
