@@ -26,6 +26,8 @@ RUN apt-get update && apt-get install -y \
 # 安装npm和codex
 ARG NODE_VERSION=22.22.2
 
+RUN curl -I https://nodejs.org || true
+
 RUN ARCH="$(dpkg --print-architecture)" && \
     case "${ARCH}" in \
       amd64) NODE_ARCH="x64" ;; \
