@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 
 import torch
@@ -19,6 +20,7 @@ class PrefillBackendSettings:
 
 
 _SETTINGS = PrefillBackendSettings()
+_BATCH_MAN_PAD64_WARNING_EMITTED = False
 
 
 def configure_prefill_attention_backend(backend: str, fallback_to_flash_attn: bool) -> None:
@@ -226,6 +228,7 @@ def _run_cuda_batch_fa2_man(
     causal: bool,
 ) -> torch.Tensor:
     """手写 CUDA batch-view 路径：逐序列调用 torch bind 自写 kernel。"""
+    global _BATCH_MAN_PAD64_WARNING_EMITTED
     padded = _varlen_to_padded(
         q,
         k,
@@ -242,9 +245,22 @@ def _run_cuda_batch_fa2_man(
     for b, (ql, kl) in enumerate(zip(padded.q_lens, padded.k_lens)):
         if ql == 0 or kl == 0:
             continue
-        q_b = q_pad[b:b + 1, :ql]
-        k_b = k_pad[b:b + 1, :kl]
-        v_b = v_pad[b:b + 1, :kl]
+        ql_pad = ((ql + 63) // 64) * 64
+        kl_pad = ((kl + 63) // 64) * 64
+        if (ql_pad != ql or kl_pad != kl) and not _BATCH_MAN_PAD64_WARNING_EMITTED:
+            warnings.warn(
+                "[WARNING][FA2_BATCH_MAN_PAD64] batch_man kernel currently requires 64-aligned "
+                "seqlen for stable numerics; applying temporary Python-side pad-to-64 hotfix.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            _BATCH_MAN_PAD64_WARNING_EMITTED = True
+        q_b = torch.zeros((1, ql_pad, q_pad.size(2), q_pad.size(3)), dtype=q_pad.dtype, device=q_pad.device)
+        k_b = torch.zeros((1, kl_pad, k_pad.size(2), k_pad.size(3)), dtype=k_pad.dtype, device=k_pad.device)
+        v_b = torch.zeros((1, kl_pad, v_pad.size(2), v_pad.size(3)), dtype=v_pad.dtype, device=v_pad.device)
+        q_b[:, :ql] = q_pad[b:b + 1, :ql]
+        k_b[:, :kl] = k_pad[b:b + 1, :kl]
+        v_b[:, :kl] = v_pad[b:b + 1, :kl]
         out_lse = torch_ext_fa2_fwd(
             q_b,
             k_b,
@@ -252,7 +268,8 @@ def _run_cuda_batch_fa2_man(
             causal=causal,
             softmax_scale=float(softmax_scale),
         )
-        out_pad[b:b + 1, :ql] = out_lse[0] if isinstance(out_lse, (tuple, list)) else out_lse
+        out_b = out_lse[0] if isinstance(out_lse, (tuple, list)) else out_lse
+        out_pad[b:b + 1, :ql] = out_b[:, :ql]
     return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
 
 
