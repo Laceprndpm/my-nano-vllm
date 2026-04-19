@@ -6,7 +6,8 @@ This file tracks the FA2-related test suites and what they validate.
 
 | Test file | Category | Key checks |
 |---|---|---|
-| `tests/test_prefill_attention_mode_routing.py` | Routing / mode switch | `NANOVLLM_FA2_MODE` dispatch for `varlen_official`, `varlen_man`, `batch_official`, `batch_man`; varlen block_table normalization contract |
+| `tests/test_prefill_attention_mode_routing.py` | Routing / mode switch | `NANOVLLM_FA2_MODE` dispatch for `varlen_official`, `varlen_man`, `batch_official`, `batch_man`, `batch_debug`; varlen block_table normalization contract |
+| `tests/test_batch_debug_mode.py` | Batch-debug behavior | debug mode runs `batch_man` + `batch_official`, returns man output on close match, raises on diff, rejects non-empty `block_table` |
 | `tests/test_varlen_api_contract.py` | Varlen API contract | `fa2_varlen_fwd` argument validation (`block_table`, batch dim, dtypes) and output match vs `flash_attn_varlen_func` on empty block table |
 | `tests/test_prefill_attention_batch_view.py` | Batch-view correctness | varlen<->padded roundtrip, backend equivalence, padding invariance, causal masking behavior |
 | `tests/test_batch_man_pad64_hotfix.py` | Batch-man hotfix | non-64 seqlen triggers pad-to-64 + `[WARNING][FA2_BATCH_MAN_PAD64]`; aligned seqlen does not warn |
@@ -30,6 +31,7 @@ This file tracks the FA2-related test suites and what they validate.
 - Causal masking blocks future-token influence in batch-view flow
 - Mode routing chooses the intended implementation branch
 - batch_man temporary pad64 hotfix emits warning on unaligned shapes
+- batch_debug compares handwritten and official batch outputs and fails fast on mismatch
 - flash-attn numerical agreement includes `N=64/128/192/512/1024` (separate from batch_man hotfix contract tests)
 
 ## Run commands
@@ -39,5 +41,6 @@ python3 -m pytest -q tests/test_prefill_attention_mode_routing.py
 python3 -m pytest -q tests/test_varlen_api_contract.py
 python3 -m pytest -q tests/test_prefill_attention_batch_view.py
 python3 -m pytest -q tests/test_batch_man_pad64_hotfix.py
+python3 -m pytest -q tests/test_batch_debug_mode.py
 python3 -m pytest -q tests/test_flash_attn_correctness.py
 ```
