@@ -21,7 +21,7 @@ def test_batch_man_pad64_emits_warning_and_pads(monkeypatch):
         called_shapes.append((tuple(q.shape), tuple(k.shape), tuple(v.shape), causal, softmax_scale))
         return q.clone(), torch.zeros((q.size(0), q.size(1), q.size(2)), dtype=torch.float32, device=q.device)
 
-    monkeypatch.setattr(prefill_attention, "torch_ext_fa2_fwd", _fake_fwd)
+    monkeypatch.setattr(prefill_attention, "torch_ext_fa2_batch_fwd", _fake_fwd)
 
     q = torch.randn(63, 4, 64, dtype=torch.float16)
     k = torch.randn(63, 4, 64, dtype=torch.float16)
@@ -57,7 +57,7 @@ def test_batch_man_no_warning_when_aligned(monkeypatch):
         called_shapes.append((tuple(q.shape), tuple(k.shape), tuple(v.shape), causal, softmax_scale))
         return q.clone(), torch.zeros((q.size(0), q.size(1), q.size(2)), dtype=torch.float32, device=q.device)
 
-    monkeypatch.setattr(prefill_attention, "torch_ext_fa2_fwd", _fake_fwd)
+    monkeypatch.setattr(prefill_attention, "torch_ext_fa2_batch_fwd", _fake_fwd)
 
     q = torch.randn(64, 4, 64, dtype=torch.float16)
     k = torch.randn(64, 4, 64, dtype=torch.float16)

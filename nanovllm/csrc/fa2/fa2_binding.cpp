@@ -1,7 +1,7 @@
 #include <torch/extension.h>
 #include <vector>
 
-std::vector<torch::Tensor> fa2_fwd_cuda(
+std::vector<torch::Tensor> fa2_batch_fwd_cuda(
     torch::Tensor q,
     torch::Tensor k,
     torch::Tensor v,
@@ -19,7 +19,7 @@ torch::Tensor fa2_varlen_fwd_cuda(
     bool causal,
     double softmax_scale);
 
-std::vector<torch::Tensor> fa2_fwd(
+std::vector<torch::Tensor> fa2_batch_fwd(
     torch::Tensor q,
     torch::Tensor k,
     torch::Tensor v,
@@ -28,7 +28,7 @@ std::vector<torch::Tensor> fa2_fwd(
   TORCH_CHECK(q.is_cuda(), "q must be CUDA tensor");
   TORCH_CHECK(k.is_cuda(), "k must be CUDA tensor");
   TORCH_CHECK(v.is_cuda(), "v must be CUDA tensor");
-  return fa2_fwd_cuda(q, k, v, causal, softmax_scale);
+  return fa2_batch_fwd_cuda(q, k, v, causal, softmax_scale);
 }
 
 torch::Tensor fa2_varlen_fwd(
@@ -62,6 +62,6 @@ torch::Tensor fa2_varlen_fwd(
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("fa2_fwd", &fa2_fwd, "Nano-vLLM handwritten FA2 forward (CUDA)");
+  m.def("fa2_batch_fwd", &fa2_batch_fwd, "Nano-vLLM handwritten FA2 batch forward (CUDA)");
   m.def("fa2_varlen_fwd", &fa2_varlen_fwd, "Nano-vLLM handwritten FA2 varlen forward (CUDA)");
 }

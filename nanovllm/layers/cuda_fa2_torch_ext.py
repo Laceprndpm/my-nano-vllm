@@ -63,7 +63,7 @@ def load_cuda_fa2_extension():
     )
 
 
-def fa2_fwd(
+def fa2_batch_fwd(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -79,13 +79,13 @@ def fa2_fwd(
     v_bhsd = v.transpose(1, 2).contiguous()
 
     ext = load_cuda_fa2_extension()
-    out_lse = ext.fa2_fwd(q_bhsd, k_bhsd, v_bhsd, causal, softmax_scale)
+    out_lse = ext.fa2_batch_fwd(q_bhsd, k_bhsd, v_bhsd, causal, softmax_scale)
     if isinstance(out_lse, (tuple, list)) and len(out_lse) == 2:
         out_bhsd, lse_bhs = out_lse
         out_bshd = out_bhsd.transpose(1, 2).contiguous()
         lse_bsh = lse_bhs.transpose(1, 2).contiguous()
         return out_bshd, lse_bsh
-    raise RuntimeError("fa2_fwd extension returned invalid output; expected (out, lse)")
+    raise RuntimeError("fa2_batch_fwd extension returned invalid output; expected (out, lse)")
 
 
 def fa2_varlen_fwd(

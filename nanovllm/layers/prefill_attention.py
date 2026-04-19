@@ -8,7 +8,7 @@ import torch
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 
 from nanovllm.layers.cuda_fa2_torch_ext import (
-    fa2_fwd as torch_ext_fa2_fwd,
+    fa2_batch_fwd as torch_ext_fa2_batch_fwd,
     fa2_varlen_fwd as torch_ext_fa2_varlen_fwd,
 )
 
@@ -261,7 +261,7 @@ def _run_cuda_batch_fa2_man(
         q_b[:, :ql] = q_pad[b:b + 1, :ql]
         k_b[:, :kl] = k_pad[b:b + 1, :kl]
         v_b[:, :kl] = v_pad[b:b + 1, :kl]
-        out_lse = torch_ext_fa2_fwd(
+        out_lse = torch_ext_fa2_batch_fwd(
             q_b,
             k_b,
             v_b,

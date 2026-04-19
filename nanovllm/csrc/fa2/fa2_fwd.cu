@@ -8,7 +8,7 @@ std::vector<torch::Tensor> flash_attention_v2_cutlass(
     bool is_causal,
     float softmax_scale);
 
-std::vector<torch::Tensor> fa2_fwd_cuda(
+std::vector<torch::Tensor> fa2_batch_fwd_cuda(
     torch::Tensor q,
     torch::Tensor k,
     torch::Tensor v,
