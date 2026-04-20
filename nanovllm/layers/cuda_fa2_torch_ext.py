@@ -21,7 +21,7 @@ def load_cuda_fa2_extension():
     root = _ext_root()
     cpp_path = os.path.join(root, "fa2_binding.cpp")
     cu_path = os.path.join(root, "fa2_fwd.cu")
-    core_cu = os.path.join(root, "flash_attention.cu")
+    core_cu = os.path.join(root, "batch", "batch_fwd.cu")
     varlen_cu = os.path.join(root, "varlen", "varlen_stub.cu")
     if not os.path.exists(cpp_path) or not os.path.exists(cu_path) or not os.path.exists(core_cu) or not os.path.exists(varlen_cu):
         raise RuntimeError(f"FA2 torch extension sources not found under {root}")

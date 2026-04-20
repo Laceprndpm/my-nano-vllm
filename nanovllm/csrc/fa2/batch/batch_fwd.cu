@@ -335,7 +335,7 @@ inline __device__ void softmax_rescale_o(Tensor0 &scores, Tensor1 &scores_max, T
 
 } // namespace flash
 
-void set_params_fprop(BatchFwdParams &params,
+void set_params_batch_fwd(BatchFwdParams &params,
 
                       // device pointers
                       const torch::Tensor q,
@@ -398,7 +398,7 @@ struct SharedStorage {
 };
 
 template <typename Kernel_traits, bool Is_causal=false, typename Params>
-__global__ void flash_attention_v2_cutlass_kernel(const Params params) {
+__global__ void fa2_batch_fwd_kernel(const Params params) {
 
   using namespace cute;
 
@@ -717,7 +717,7 @@ __global__ void flash_attention_v2_cutlass_kernel(const Params params) {
 }
 
 template<typename Kernel_traits, bool Is_causal>
-void run_flash_fwd(BatchFwdParams &params, cudaStream_t stream) {
+void launch_fa2_batch_fwd(BatchFwdParams &params, cudaStream_t stream) {
   // TODO: check if works: default stream = 0
   using Element = typename Kernel_traits::Element;
   using SmemLayoutQ = typename Kernel_traits::SmemLayoutQ;
@@ -732,7 +732,7 @@ void run_flash_fwd(BatchFwdParams &params, cudaStream_t stream) {
 
   int smem_size = int(sizeof(SharedStorage<Element, SmemLayoutQ, SmemLayoutK, SmemLayoutV>));
 
-  auto kernel = &flash_attention_v2_cutlass_kernel<Kernel_traits, Is_causal, BatchFwdParams>;
+  auto kernel = &fa2_batch_fwd_kernel<Kernel_traits, Is_causal, BatchFwdParams>;
   // NOTE: smem过大时需要设置
   if (smem_size >= 48 * 1024) {
       CUDA_ERROR_CHECK(cudaFuncSetAttribute(
@@ -744,28 +744,28 @@ void run_flash_fwd(BatchFwdParams &params, cudaStream_t stream) {
 }
 
 template<typename T, int Headdim>
-void run_flash_fwd_(BatchFwdParams &params, cudaStream_t stream);
+void dispatch_fa2_batch_fwd(BatchFwdParams &params, cudaStream_t stream);
 
 // TODO: 挨个写出特化, 目前使用通用模板
 // 如, run_flash_fwd_hdim32用于特化hdim=32
 // 这样做可以根据实际情况微调kBlockN和kBlockM的组合, 也可以加速编译
 template<typename T, int Headdim>
-void run_flash_fwd_(BatchFwdParams &params, cudaStream_t stream) {
+void dispatch_fa2_batch_fwd(BatchFwdParams &params, cudaStream_t stream) {
     BOOL_SWITCH(params.is_causal, Is_causal, [&] {
         // run_flash_fwd<Flash_fwd_kernel_traits<Headdim, /*kBlockM_=*/128, /*kBlockN_=*/128, /*kNWarps_=*/4, T>, Is_causal>(params, stream);
 
         // TODO: kBlockM, kBlockN的组合
-        run_flash_fwd<Flash_fwd_kernel_traits<Headdim, /*kBlockM_=*/64, /*kBlockN_=*/64, /*kNWarps_=*/4, T>, Is_causal>(params, stream);
+        launch_fa2_batch_fwd<Flash_fwd_kernel_traits<Headdim, /*kBlockM_=*/64, /*kBlockN_=*/64, /*kNWarps_=*/4, T>, Is_causal>(params, stream);
     });
 }
 
 // entry point of flash attention
-void run_flash_attn_cutlass(BatchFwdParams &params, cudaStream_t stream) {
+void run_fa2_batch_fwd(BatchFwdParams &params, cudaStream_t stream) {
     // FP16_SWITCH yield elem_type namespace
     FP16_SWITCH(!params.is_bf16, [&] {
         // FWD_HEADDIM_SWITCH yield kHeadDim constexpr
         FWD_HEADDIM_SWITCH(params.dim, [&] {
-            run_flash_fwd_<elem_type, kHeadDim>(params, stream);
+            dispatch_fa2_batch_fwd<elem_type, kHeadDim>(params, stream);
         });
     });
 }
@@ -810,24 +810,14 @@ std::vector<torch::Tensor> fa2_batch_fwd_cuda_impl(
   auto softmax_lse = torch::empty({bs, head, seqlen}, opts.dtype(torch::kFloat32));
 
   BatchFwdParams params;
-  set_params_fprop(params, q, k, v, out,
+  set_params_batch_fwd(params, q, k, v, out,
       softmax_lse.data_ptr(), softmax_scale, is_causal);
 
-  run_flash_attn_cutlass(params, 0);
+  run_fa2_batch_fwd(params, 0);
 
   // Wait until kernel finish.
   cudaDeviceSynchronize();
   CUDA_ERROR_CHECK(cudaGetLastError());
 
   return {out, softmax_lse};
-}
-
-// Backward-compatible alias during layered refactor.
-std::vector<torch::Tensor> flash_attention_v2_cutlass(
-    torch::Tensor q,
-    torch::Tensor k,
-    torch::Tensor v,
-    bool is_causal,
-    float softmax_scale) {
-  return fa2_batch_fwd_cuda_impl(q, k, v, is_causal, softmax_scale);
 }
