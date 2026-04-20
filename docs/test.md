@@ -11,6 +11,7 @@ This file tracks the FA2-related test suites and what they validate.
 | `tests/test_varlen_api_contract.py` | Varlen API contract | `fa2_varlen_fwd` argument validation (`block_table`, batch dim, dtypes) and output match vs `flash_attn_varlen_func` on empty block table |
 | `tests/test_prefill_attention_batch_view.py` | Batch-view correctness | varlen<->padded roundtrip, backend equivalence, padding invariance, causal masking behavior |
 | `tests/test_batch_man_pad64_hotfix.py` | Batch-man hotfix | non-64 seqlen triggers pad-to-64 + `[WARNING][FA2_BATCH_MAN_PAD64]`; aligned seqlen does not warn |
+| `tests/test_prefill_attention_nvtx.py` | NVTX annotation | `NANOVLLM_NVTX` off/on behavior, batch path range names, and push/pop exception safety |
 | `tests/test_flash_attn_correctness.py` | Numerical correctness | SDPA vs flash-attn numerical agreement across multiple `(B, H, N, D)` shapes |
 
 ## Shape-focused checks
@@ -41,6 +42,30 @@ python3 -m pytest -q tests/test_prefill_attention_mode_routing.py
 python3 -m pytest -q tests/test_varlen_api_contract.py
 python3 -m pytest -q tests/test_prefill_attention_batch_view.py
 python3 -m pytest -q tests/test_batch_man_pad64_hotfix.py
+python3 -m pytest -q tests/test_prefill_attention_nvtx.py
 python3 -m pytest -q tests/test_batch_debug_mode.py
 python3 -m pytest -q tests/test_flash_attn_correctness.py
+```
+
+## NCU + NVTX Usage
+
+- NVTX is off by default. Enable with `NANOVLLM_NVTX=1`.
+- Batch paths expose ranges:
+  - `prefill.batch_official`
+  - `prefill.batch_man`
+
+Profile handwritten batch path only:
+
+```bash
+NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_man \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_man" \
+python3 example.py
+```
+
+Profile official batch path only:
+
+```bash
+NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_official \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_official" \
+python3 example.py
 ```
