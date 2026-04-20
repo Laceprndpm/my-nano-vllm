@@ -11,10 +11,11 @@
 #include <torch/python.h>
 #include <vector>
 
-#include "static_switch.h"
-#include "kernel_traits.h"
-#include "flash.h"
-#include "utils.h"
+#include "common/static_switch.h"
+#include "common/kernel_traits.h"
+#include "batch/batch_params.h"
+#include "batch/batch_api.h"
+#include "common/utils.h"
 
 namespace flash {
 
@@ -334,7 +335,7 @@ inline __device__ void softmax_rescale_o(Tensor0 &scores, Tensor1 &scores_max, T
 
 } // namespace flash
 
-void set_params_fprop(Flash_fwd_params &params,
+void set_params_fprop(BatchFwdParams &params,
 
                       // device pointers
                       const torch::Tensor q,
@@ -716,7 +717,7 @@ __global__ void flash_attention_v2_cutlass_kernel(const Params params) {
 }
 
 template<typename Kernel_traits, bool Is_causal>
-void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
+void run_flash_fwd(BatchFwdParams &params, cudaStream_t stream) {
   // TODO: check if works: default stream = 0
   using Element = typename Kernel_traits::Element;
   using SmemLayoutQ = typename Kernel_traits::SmemLayoutQ;
@@ -731,7 +732,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
 
   int smem_size = int(sizeof(SharedStorage<Element, SmemLayoutQ, SmemLayoutK, SmemLayoutV>));
 
-  auto kernel = &flash_attention_v2_cutlass_kernel<Kernel_traits, Is_causal, Flash_fwd_params>;
+  auto kernel = &flash_attention_v2_cutlass_kernel<Kernel_traits, Is_causal, BatchFwdParams>;
   // NOTE: smem过大时需要设置
   if (smem_size >= 48 * 1024) {
       CUDA_ERROR_CHECK(cudaFuncSetAttribute(
@@ -743,13 +744,13 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
 }
 
 template<typename T, int Headdim>
-void run_flash_fwd_(Flash_fwd_params &params, cudaStream_t stream);
+void run_flash_fwd_(BatchFwdParams &params, cudaStream_t stream);
 
 // TODO: 挨个写出特化, 目前使用通用模板
 // 如, run_flash_fwd_hdim32用于特化hdim=32
 // 这样做可以根据实际情况微调kBlockN和kBlockM的组合, 也可以加速编译
 template<typename T, int Headdim>
-void run_flash_fwd_(Flash_fwd_params &params, cudaStream_t stream) {
+void run_flash_fwd_(BatchFwdParams &params, cudaStream_t stream) {
     BOOL_SWITCH(params.is_causal, Is_causal, [&] {
         // run_flash_fwd<Flash_fwd_kernel_traits<Headdim, /*kBlockM_=*/128, /*kBlockN_=*/128, /*kNWarps_=*/4, T>, Is_causal>(params, stream);
 
@@ -759,7 +760,7 @@ void run_flash_fwd_(Flash_fwd_params &params, cudaStream_t stream) {
 }
 
 // entry point of flash attention
-void run_flash_attn_cutlass(Flash_fwd_params &params, cudaStream_t stream) {
+void run_flash_attn_cutlass(BatchFwdParams &params, cudaStream_t stream) {
     // FP16_SWITCH yield elem_type namespace
     FP16_SWITCH(!params.is_bf16, [&] {
         // FWD_HEADDIM_SWITCH yield kHeadDim constexpr
@@ -769,8 +770,12 @@ void run_flash_attn_cutlass(Flash_fwd_params &params, cudaStream_t stream) {
     });
 }
 
-std::vector<torch::Tensor> flash_attention_v2_cutlass(torch::Tensor q, torch::Tensor k,
-                                      torch::Tensor v, bool is_causal = false, float softmax_scale=1) {
+std::vector<torch::Tensor> fa2_batch_fwd_cuda_impl(
+    torch::Tensor q,
+    torch::Tensor k,
+    torch::Tensor v,
+    bool is_causal = false,
+    float softmax_scale = 1) {
 
   CHECK_INPUT(q);
   CHECK_INPUT(k);
@@ -804,7 +809,7 @@ std::vector<torch::Tensor> flash_attention_v2_cutlass(torch::Tensor q, torch::Te
   auto opts = q.options();
   auto softmax_lse = torch::empty({bs, head, seqlen}, opts.dtype(torch::kFloat32));
 
-  Flash_fwd_params params;
+  BatchFwdParams params;
   set_params_fprop(params, q, k, v, out,
       softmax_lse.data_ptr(), softmax_scale, is_causal);
 
@@ -815,4 +820,14 @@ std::vector<torch::Tensor> flash_attention_v2_cutlass(torch::Tensor q, torch::Te
   CUDA_ERROR_CHECK(cudaGetLastError());
 
   return {out, softmax_lse};
+}
+
+// Backward-compatible alias during layered refactor.
+std::vector<torch::Tensor> flash_attention_v2_cutlass(
+    torch::Tensor q,
+    torch::Tensor k,
+    torch::Tensor v,
+    bool is_causal,
+    float softmax_scale) {
+  return fa2_batch_fwd_cuda_impl(q, k, v, is_causal, softmax_scale);
 }

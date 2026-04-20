@@ -22,7 +22,8 @@ def load_cuda_fa2_extension():
     cpp_path = os.path.join(root, "fa2_binding.cpp")
     cu_path = os.path.join(root, "fa2_fwd.cu")
     core_cu = os.path.join(root, "flash_attention.cu")
-    if not os.path.exists(cpp_path) or not os.path.exists(cu_path) or not os.path.exists(core_cu):
+    varlen_cu = os.path.join(root, "varlen", "varlen_stub.cu")
+    if not os.path.exists(cpp_path) or not os.path.exists(cu_path) or not os.path.exists(core_cu) or not os.path.exists(varlen_cu):
         raise RuntimeError(f"FA2 torch extension sources not found under {root}")
     repo_root = Path(root).resolve().parents[2]
     include_dirs = [
@@ -52,7 +53,7 @@ def load_cuda_fa2_extension():
             pass
     return load(
         name="nanovllm_fa2_ext",
-        sources=[cpp_path, cu_path, core_cu],
+        sources=[cpp_path, cu_path, core_cu, varlen_cu],
         extra_include_paths=include_dirs,
         extra_cflags=["-O3", "-std=c++20"],
         extra_cuda_cflags=[
