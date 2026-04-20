@@ -1,66 +1,70 @@
-<p align="center">
-<img width="300" src="assets/logo.png">
-</p>
+# Nano-vLLM + Custom CUDA FA2
 
-<p align="center">
-<a href="https://trendshift.io/repositories/15323" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15323" alt="GeeeekExplorer%2Fnano-vllm | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-</p>
+This repository is based on [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) and extended with a custom CUDA FlashAttention2 (FA2) integration workflow.
 
-# Nano-vLLM
+The goal of this project is to keep the lightweight nano-vllm runtime while iterating on handwritten CUDA attention kernels, correctness checks, and profiling/debug tooling.
 
-A lightweight vLLM implementation built from scratch.
+## What Is Added in This Repo
 
-## Key Features
-
-* 🚀 **Fast offline inference** - Comparable inference speeds to vLLM
-* 📖 **Readable codebase** - Clean implementation in ~ 1,200 lines of Python code
-* ⚡ **Optimization Suite** - Prefix caching, Tensor Parallelism, Torch compilation, CUDA graph, etc.
+- Runtime backend routing for prefill attention (`flash_attn` / `cuda_fa2`).
+- FA2 mode switch via `NANOVLLM_FA2_MODE`:
+  - `varlen_official`
+  - `varlen_man` (placeholder path today)
+  - `batch_official`
+  - `batch_man` (handwritten CUDA path via Torch extension)
+  - `batch_debug` (run official + manual and assert diff)
+- Handwritten CUDA extension entry points under `nanovllm/csrc/fa2`.
+- CUDA profiling support with optional NVTX ranges:
+  - `prefill.batch_official`
+  - `prefill.batch_man`
 
 ## Installation
 
 ```bash
-pip install git+https://github.com/GeeeekExplorer/nano-vllm.git
+python3 -m pip install -e .
 ```
 
-## Model Download
-
-To download the model weights manually, use the following command:
-```bash
-huggingface-cli download --resume-download Qwen/Qwen3-0.6B \
-  --local-dir ~/huggingface/Qwen3-0.6B/ \
-  --local-dir-use-symlinks False
-```
+Use a CUDA-enabled environment with compatible `torch`, `triton`, and `flash-attn`.
 
 ## Quick Start
 
-See `example.py` for usage. The API mirrors vLLM's interface with minor differences in the `LLM.generate` method:
-```python
-from nanovllm import LLM, SamplingParams
-llm = LLM("/YOUR/MODEL/PATH", enforce_eager=True, tensor_parallel_size=1)
-sampling_params = SamplingParams(temperature=0.6, max_tokens=256)
-prompts = ["Hello, Nano-vLLM."]
-outputs = llm.generate(prompts, sampling_params)
-outputs[0]["text"]
+```bash
+python3 example.py
 ```
 
-## Benchmark
+You can select FA2 runtime mode at launch:
 
-See `bench.py` for benchmark.
+```bash
+NANOVLLM_FA2_MODE=batch_man python3 example.py
+```
 
-**Test Configuration:**
-- Hardware: RTX 4070 Laptop (8GB)
-- Model: Qwen3-0.6B
-- Total Requests: 256 sequences
-- Input Length: Randomly sampled between 100–1024 tokens
-- Output Length: Randomly sampled between 100–1024 tokens
+## Test
 
-**Performance Results:**
-| Inference Engine | Output Tokens | Time (s) | Throughput (tokens/s) |
-|----------------|-------------|----------|-----------------------|
-| vLLM           | 133,966     | 98.37    | 1361.84               |
-| Nano-vLLM      | 133,966     | 93.41    | 1434.13               |
+Run project tests (recommended command for this repo):
 
+```bash
+python3 -m pytest -q tests
+```
 
-## Star History
+## Profiling (NCU + NVTX)
 
-[![Star History Chart](https://api.star-history.com/svg?repos=GeeeekExplorer/nano-vllm&type=Date)](https://www.star-history.com/#GeeeekExplorer/nano-vllm&Date)
+Enable NVTX only when needed:
+
+```bash
+NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_man \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_man/" \
+python3 example.py
+```
+
+For the official batch path:
+
+```bash
+NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_official \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_official/" \
+python3 example.py
+```
+
+## Notes
+
+- The handwritten **batch** kernel path is implemented and tested.
+- The handwritten **varlen** CUDA kernel is not implemented yet; `varlen_man` currently remains a placeholder route.
