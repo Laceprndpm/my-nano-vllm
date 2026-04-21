@@ -10,6 +10,7 @@
 
 namespace {
 
+// NOTE: Minimal scalar helpers to keep the kernel templated for fp16/bf16.
 template <typename T>
 __device__ inline float to_float(T x);
 
@@ -55,6 +56,9 @@ __global__ void fa2_varlen_fwd_kernel(
     float softmax_scale,
     bool causal,
     bool paged_kv) {
+  // NOTE:
+  // Grid mapping: one thread computes one (q_token, q_head) output vector.
+  // This is intentionally simple for correctness-first bring-up.
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int total_work = total_q * q_heads;
   if (tid >= total_work) {
@@ -64,6 +68,9 @@ __global__ void fa2_varlen_fwd_kernel(
   int q_idx = tid / q_heads;
   int q_head = tid % q_heads;
 
+  // NOTE:
+  // Find sequence id b such that q_idx ∈ [cu_seqlens_q[b], cu_seqlens_q[b+1]).
+  // Current minimal path uses linear scan over batch.
   int b = 0;
   for (int i = 0; i < batch; ++i) {
     int32_t start = cu_seqlens_q[i];
@@ -83,10 +90,16 @@ __global__ void fa2_varlen_fwd_kernel(
   int32_t q_local = q_idx - q_start;
 
   int kv_head = q_head % kv_heads;
+  // NOTE:
+  // Bottom-right causal alignment for varlen:
+  // valid key positions satisfy kj <= (k_len - q_len) + q_local.
   int32_t causal_limit = (k_len - q_len) + q_local;
 
   const scalar_t* q_vec = q + (static_cast<int64_t>(q_idx) * q_heads + q_head) * head_dim;
 
+  // NOTE:
+  // Online softmax state:
+  // m = running max logit, l = running denominator, acc = running weighted sum.
   float m = -INFINITY;
   float l = 0.0f;
   float acc[64];
@@ -103,6 +116,10 @@ __global__ void fa2_varlen_fwd_kernel(
     const scalar_t* k_vec;
     const scalar_t* v_vec;
     if (paged_kv) {
+      // NOTE:
+      // Paged KV lookup:
+      // logical key index kj -> (block_pos, in_block) -> block_id via block_table.
+      // block_id < 0 is treated as invalid (padding entry in block_table).
       int32_t block_pos = kj / block_size;
       int32_t in_block = kj % block_size;
       int32_t block_id = block_table[b * block_table_cols + block_pos];
@@ -113,6 +130,9 @@ __global__ void fa2_varlen_fwd_kernel(
       k_vec = k + base * head_dim;
       v_vec = v + base * head_dim;
     } else {
+      // NOTE:
+      // Dense varlen KV path:
+      // use cu_seqlens_k to map local key index to flattened k/v index.
       int64_t key_index = k_start + kj;
       int64_t base = key_index * kv_heads + kv_head;
       k_vec = k + base * head_dim;
@@ -126,6 +146,11 @@ __global__ void fa2_varlen_fwd_kernel(
     }
     score *= softmax_scale;
 
+    // NOTE:
+    // Online softmax update:
+    // m_new = max(m, score)
+    // acc <- acc * exp(m - m_new) + v * exp(score - m_new)
+    // l   <- l   * exp(m - m_new) + exp(score - m_new)
     float m_new = fmaxf(m, score);
     float alpha = __expf(m - m_new);
     float beta = __expf(score - m_new);
@@ -137,6 +162,7 @@ __global__ void fa2_varlen_fwd_kernel(
     m = m_new;
   }
 
+  // NOTE: normalize by final denominator to produce attention output.
   float inv_l = l > 0.0f ? (1.0f / l) : 0.0f;
   scalar_t* out_vec = out + (static_cast<int64_t>(q_idx) * q_heads + q_head) * head_dim;
 #pragma unroll
@@ -158,6 +184,9 @@ torch::Tensor fa2_varlen_fwd_cuda_impl(
     torch::Tensor block_table,
     bool causal,
     double softmax_scale) {
+  // NOTE:
+  // Minimal API contract checks. This implementation currently focuses on a
+  // correctness-first path for head_dim=64 and 64-aligned max seqlens.
   TORCH_CHECK(q.is_cuda() && k.is_cuda() && v.is_cuda(), "q, k, v must be CUDA tensors");
   TORCH_CHECK(cu_seqlens_q.is_cuda() && cu_seqlens_k.is_cuda(), "cu_seqlens must be CUDA tensors");
   TORCH_CHECK(block_table.is_cuda(), "block_table must be CUDA tensor");
@@ -174,12 +203,14 @@ torch::Tensor fa2_varlen_fwd_cuda_impl(
 
   bool paged_kv = block_table.numel() > 0;
   if (paged_kv) {
+    // NOTE: paged KV cache layout: [num_blocks, block_size, kv_heads, head_dim].
     TORCH_CHECK(k.dim() == 4, "paged-KV mode expects k as [num_blocks, block_size, kv_heads, head_dim]");
     TORCH_CHECK(v.dim() == 4, "paged-KV mode expects v as [num_blocks, block_size, kv_heads, head_dim]");
     TORCH_CHECK(block_table.dim() == 2, "block_table must be rank-2");
     TORCH_CHECK(block_table.scalar_type() == torch::kInt32, "block_table must be int32");
     TORCH_CHECK(k.size(3) == 64 && v.size(3) == 64, "head_dim mismatch in paged k/v");
   } else {
+    // NOTE: dense varlen KV layout: [total_k, kv_heads, head_dim].
     TORCH_CHECK(k.dim() == 3 && v.dim() == 3, "non-paged mode expects k/v as [total_k, kv_heads, head_dim]");
     TORCH_CHECK(k.size(2) == 64 && v.size(2) == 64, "head_dim mismatch in k/v");
   }
@@ -206,6 +237,7 @@ torch::Tensor fa2_varlen_fwd_cuda_impl(
 
   auto out = torch::empty_like(q_);
 
+  // NOTE: one-dimensional launch over (total_q * q_heads).
   constexpr int threads = 128;
   int total_work = total_q * q_heads;
   int blocks = (total_work + threads - 1) / threads;
