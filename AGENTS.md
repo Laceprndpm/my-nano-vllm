@@ -36,11 +36,21 @@ Use a CUDA-enabled environment with compatible `torch`, `triton`, and `flash-att
 ## Commit & Pull Request Guidelines
 - Recent history uses short, imperative commit subjects (for example: `import nanovllm`, `update docker`).
 - Keep commit messages concise and scoped to one logical change.
+- Agent rule: after each completed implementation task, create a git commit automatically unless the user explicitly says not to commit.
+- Auto-commit format:
+  - Subject: short imperative line (for example: `add varlen_man correctness tests`).
+  - Body: optional 1-3 bullets for key files/behavior changes.
+  - Before commit: run relevant tests or checks; if any are skipped/failed, state that in the commit body.
 - PRs should include:
   - What changed and why.
   - How to run/reproduce (`python ...` commands).
   - Hardware/software context for performance-related changes.
   - Linked issue(s) when applicable.
+
+## Agent Workflow
+- Default behavior: implement requested changes end-to-end, verify with focused tests, then commit.
+- If the worktree contains unrelated dirty files, do not revert them; commit only files relevant to the completed task.
+- Use one logical commit per task completion; avoid mixing unrelated changes.
 
 ## Security & Configuration Tips
 - Do not commit model weights, secrets, or local absolute paths.
