@@ -10,7 +10,8 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 
 from nanovllm.layers.cuda_fa2_torch_ext import (
     fa2_batch_fwd as torch_ext_fa2_batch_fwd,
-    fa2_varlen_fwd as torch_ext_fa2_varlen_fwd,
+    fa2_varlen_fwd_man as torch_ext_fa2_varlen_fwd_man,
+    fa2_varlen_fwd_official as torch_ext_fa2_varlen_fwd_official,
 )
 
 
@@ -361,8 +362,8 @@ def _run_cuda_varlen_fa2_official(
     softmax_scale: float,
     causal: bool,
 ) -> torch.Tensor:
-    """官方 varlen 路径：当前通过 flash-attn varlen 占位接口贯通。"""
-    return torch_ext_fa2_varlen_fwd(
+    """官方 varlen 路径：调用 flash-attn varlen 参考实现。"""
+    return torch_ext_fa2_varlen_fwd_official(
         q,
         k,
         v,
@@ -389,8 +390,8 @@ def _run_cuda_varlen_fa2_man_placeholder(
     softmax_scale: float,
     causal: bool,
 ) -> torch.Tensor:
-    """手写 CUDA varlen 路径占位：暂时回落到官方 varlen 实现。"""
-    return _run_cuda_varlen_fa2_official(
+    """手写 CUDA varlen 路径（保留 placeholder 命名以兼容既有调用方）。"""
+    return torch_ext_fa2_varlen_fwd_man(
         q,
         k,
         v,

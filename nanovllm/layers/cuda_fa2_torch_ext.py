@@ -22,7 +22,7 @@ def load_cuda_fa2_extension():
     cpp_path = os.path.join(root, "fa2_binding.cpp")
     cu_path = os.path.join(root, "fa2_fwd.cu")
     core_cu = os.path.join(root, "batch", "batch_fwd.cu")
-    varlen_cu = os.path.join(root, "varlen", "varlen_stub.cu")
+    varlen_cu = os.path.join(root, "varlen", "varlen_fwd.cu")
     if not os.path.exists(cpp_path) or not os.path.exists(cu_path) or not os.path.exists(core_cu) or not os.path.exists(varlen_cu):
         raise RuntimeError(f"FA2 torch extension sources not found under {root}")
     repo_root = Path(root).resolve().parents[2]
@@ -89,7 +89,7 @@ def fa2_batch_fwd(
     raise RuntimeError("fa2_batch_fwd extension returned invalid output; expected (out, lse)")
 
 
-def fa2_varlen_fwd(
+def _validate_varlen_inputs(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -99,9 +99,19 @@ def fa2_varlen_fwd(
     max_seqlen_q: int,
     max_seqlen_k: int,
     block_table: torch.Tensor,
-    causal: bool,
-    softmax_scale: float,
-) -> torch.Tensor:
+):
+    if q.dim() != 3:
+        raise ValueError("q must be rank-3 [total_q, q_heads, head_dim]")
+    if k.dim() not in (3, 4):
+        raise ValueError("k must be rank-3 (dense varlen) or rank-4 (paged cache)")
+    if v.dim() != k.dim():
+        raise ValueError("k and v rank mismatch")
+    if q.dtype != k.dtype or q.dtype != v.dtype:
+        raise ValueError("q, k, v must have same dtype")
+    if q.dtype not in (torch.float16, torch.bfloat16):
+        raise ValueError("q, k, v must be fp16/bf16")
+    if max_seqlen_q <= 0 or max_seqlen_k <= 0:
+        raise ValueError("max_seqlen_q/max_seqlen_k must be positive")
     if block_table is None:
         raise ValueError("block_table is required; pass an empty int32 tensor when no prefix cache")
     if block_table.dim() != 2:
@@ -120,9 +130,33 @@ def fa2_varlen_fwd(
     if block_table.size(0) != batch:
         raise ValueError(f"block_table batch mismatch: expected {batch}, got {block_table.size(0)}")
 
+
+def fa2_varlen_fwd_official(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    block_table: torch.Tensor,
+    causal: bool,
+    softmax_scale: float,
+) -> torch.Tensor:
+    _validate_varlen_inputs(
+        q,
+        k,
+        v,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+        block_table=block_table,
+    )
+
     block_table_for_fa = None if block_table.numel() == 0 else block_table
 
-    # Placeholder path: keep varlen dataflow complete with flash-attn while handwritten varlen CUDA is in progress.
     return flash_attn_varlen_func(
         q,
         k,
@@ -134,4 +168,71 @@ def fa2_varlen_fwd(
         softmax_scale=softmax_scale,
         causal=causal,
         block_table=block_table_for_fa,
+    )
+
+
+def fa2_varlen_fwd_man(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    block_table: torch.Tensor,
+    causal: bool,
+    softmax_scale: float,
+) -> torch.Tensor:
+    _validate_varlen_inputs(
+        q,
+        k,
+        v,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+        block_table=block_table,
+    )
+
+    ext = load_cuda_fa2_extension()
+    return ext.fa2_varlen_fwd(
+        q.contiguous(),
+        k.contiguous(),
+        v.contiguous(),
+        cu_seqlens_q.contiguous(),
+        cu_seqlens_k.contiguous(),
+        int(max_seqlen_q),
+        int(max_seqlen_k),
+        block_table.contiguous(),
+        bool(causal),
+        float(softmax_scale),
+    )
+
+
+def fa2_varlen_fwd(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    block_table: torch.Tensor,
+    causal: bool,
+    softmax_scale: float,
+) -> torch.Tensor:
+    # Keep historical API contract: this symbol maps to official/reference path.
+    return fa2_varlen_fwd_official(
+        q,
+        k,
+        v,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+        block_table=block_table,
+        causal=causal,
+        softmax_scale=softmax_scale,
     )
