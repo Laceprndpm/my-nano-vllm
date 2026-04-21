@@ -88,7 +88,11 @@ __global__ void fa2_varlen_fwd_kernel(
   int32_t k_len = k_end - k_start;
   int32_t q_local = q_idx - q_start;
 
-  int kv_head = q_head % kv_heads;
+  // NOTE:
+  // GQA/MQA mapping: multiple query heads share one KV head.
+  // Example: q_heads=16, kv_heads=4 -> q_per_kv=4, q_head [0..3] map to kv_head 0.
+  int q_per_kv = q_heads / kv_heads;
+  int kv_head = q_head / q_per_kv;
   // NOTE:
   // Bottom-right causal alignment for varlen:
   // valid key positions satisfy kj <= (k_len - q_len) + q_local.

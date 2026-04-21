@@ -229,7 +229,6 @@ def test_varlen_man_matches_official_path_for_paged_kv(seq_len, head_dim, dtype)
     )
 
 
-@pytest.mark.xfail(strict=True, reason="known kv-head mapping bug in varlen_man for GQA")
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("head_dim", SUPPORTED_HEAD_DIMS)
 @pytest.mark.parametrize("q_heads,kv_heads", GQA_HEAD_GROUPS)
@@ -281,7 +280,6 @@ def test_varlen_man_gqa_matches_flash_attn_for_dense_kv(seq_len, q_heads, kv_hea
     )
 
 
-@pytest.mark.xfail(strict=True, reason="known kv-head mapping bug in varlen_man for GQA")
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("head_dim", SUPPORTED_HEAD_DIMS)
 @pytest.mark.parametrize("q_heads,kv_heads", GQA_HEAD_GROUPS)
