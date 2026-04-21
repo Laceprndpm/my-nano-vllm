@@ -23,6 +23,7 @@ class PrefillBackendSettings:
 
 _SETTINGS = PrefillBackendSettings()
 _BATCH_MAN_PAD64_WARNING_EMITTED = False
+_VARLEN_MAN_PAD64_WARNING_EMITTED = False
 _BATCH_DEBUG_ATOL = 1e-2
 _BATCH_DEBUG_RTOL = 1e-2
 
@@ -391,13 +392,25 @@ def _run_cuda_varlen_fa2_man_placeholder(
     causal: bool,
 ) -> torch.Tensor:
     """手写 CUDA varlen 路径（保留 placeholder 命名以兼容既有调用方）。"""
+    global _VARLEN_MAN_PAD64_WARNING_EMITTED
+    aligned_max_seqlen_q = ((max_seqlen_q + 63) // 64) * 64
+    aligned_max_seqlen_k = ((max_seqlen_k + 63) // 64) * 64
+    if (aligned_max_seqlen_q != max_seqlen_q or aligned_max_seqlen_k != max_seqlen_k) and not _VARLEN_MAN_PAD64_WARNING_EMITTED:
+        warnings.warn(
+            "[WARNING][FA2_VARLEN_MAN_PAD64] varlen_man kernel currently requires 64-aligned "
+            "max_seqlen_q/max_seqlen_k; applying temporary Python-side align-to-64 hotfix.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        _VARLEN_MAN_PAD64_WARNING_EMITTED = True
+
     return torch_ext_fa2_varlen_fwd_man(
         q,
         k,
         v,
-        max_seqlen_q=max_seqlen_q,
+        max_seqlen_q=aligned_max_seqlen_q,
         cu_seqlens_q=cu_seqlens_q,
-        max_seqlen_k=max_seqlen_k,
+        max_seqlen_k=aligned_max_seqlen_k,
         cu_seqlens_k=cu_seqlens_k,
         block_table=block_table,
         softmax_scale=softmax_scale,
