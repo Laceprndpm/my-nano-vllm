@@ -1,22 +1,22 @@
 {
-  "timestamp_utc": "2026-04-19T07:38:51Z",
-  "branch": "master",
+  "timestamp_utc": "2026-04-21T16:40:00Z",
+  "branch": "varlen-fa2",
   "latest_commit": {
-    "hash": "4005e1c",
-    "message": "Checkpoint before batch_man padding hotfix"
+    "hash": "89972df",
+    "message": "fix GQA kv-head mapping in varlen_man kernel"
   },
   "recent_commits": [
     {
-      "hash": "4005e1c",
-      "message": "Checkpoint before batch_man padding hotfix"
+      "hash": "89972df",
+      "message": "fix GQA kv-head mapping in varlen_man kernel"
     },
     {
-      "hash": "cf54991",
-      "message": "Add minimal varlen FA2 API contract and integration"
+      "hash": "1b6d65d",
+      "message": "add GQA varlen_man correctness regression tests"
     },
     {
-      "hash": "7582dd0",
-      "message": "Add project status docs"
+      "hash": "d475bb7",
+      "message": "add varlen_debug mode mirroring batch_debug"
     }
   ],
   "runtime_modes": {
@@ -24,22 +24,27 @@
     "values": [
       "varlen_official",
       "varlen_man",
+      "varlen_debug",
       "batch_official",
-      "batch_man"
+      "batch_man",
+      "batch_debug"
     ]
   },
   "hotfix": {
-    "name": "batch_man_pad64_python_hotfix",
+    "name": "batch_varlen_align64_python_hotfix",
     "active": true,
-    "warning_tag": "[WARNING][FA2_BATCH_MAN_PAD64]",
-    "behavior": "pad each sequence length to multiple of 64 before handwritten batch kernel"
+    "warning_tags": [
+      "[WARNING][FA2_BATCH_MAN_PAD64]",
+      "[WARNING][FA2_VARLEN_MAN_PAD64]"
+    ],
+    "behavior": "apply Python-side align/pad-to-64 before handwritten kernels when shape is unaligned"
   },
   "open_items": [
-    "Handwritten CUDA varlen kernel is pending.",
-    "Kernel-level tail/predicate handling for handwritten batch kernel is incomplete."
+    "Kernel-level tail/predicate handling for handwritten kernels is incomplete.",
+    "Debug tolerance policy for BF16 varlen compare may need refinement."
   ],
   "next_actions": [
-    "Replace Python pad64 hotfix with kernel-level boundary/predicate fixes.",
-    "Continue mode-matrix correctness and quality validation."
+    "Replace Python align/pad hotfixes with kernel-level boundary/predicate fixes.",
+    "Continue mode-matrix correctness and quality validation across dtype/head_dim/GQA."
   ]
 }

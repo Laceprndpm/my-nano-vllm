@@ -9,7 +9,8 @@ The goal of this project is to keep the lightweight nano-vllm runtime while iter
 - Runtime backend routing for prefill attention (`flash_attn` / `cuda_fa2`).
 - FA2 mode switch via `NANOVLLM_FA2_MODE`:
   - `varlen_official`
-  - `varlen_man` (placeholder path today)
+  - `varlen_man` (handwritten CUDA varlen path via Torch extension)
+  - `varlen_debug` (run official + manual and assert diff)
   - `batch_official`
   - `batch_man` (handwritten CUDA path via Torch extension)
   - `batch_debug` (run official + manual and assert diff)
@@ -36,6 +37,12 @@ You can select FA2 runtime mode at launch:
 
 ```bash
 NANOVLLM_FA2_MODE=batch_man python3 example.py
+```
+
+Varlen debug example:
+
+```bash
+NANOVLLM_FA2_MODE=varlen_debug python3 example.py
 ```
 
 ## Test
@@ -67,4 +74,6 @@ python3 example.py
 ## Notes
 
 - The handwritten **batch** kernel path is implemented and tested.
-- The handwritten **varlen** CUDA kernel is not implemented yet; `varlen_man` currently remains a placeholder route.
+- The handwritten **varlen** kernel path is implemented (minimal kernel) with current constraints:
+  - `head_dim in {64, 128}`
+  - max sequence length alignment hotfix is applied in Python when needed
