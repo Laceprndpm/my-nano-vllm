@@ -9,7 +9,7 @@ from flash_attn import flash_attn_varlen_func
 from nanovllm.layers.cuda_fa2_torch_ext import fa2_varlen_fwd_man, fa2_varlen_fwd_official
 
 
-DTYPE = torch.float16
+DTYPES = [torch.float16, torch.bfloat16]
 Q_HEADS = 4
 KV_HEADS = 4
 BLOCK_SIZE = 64
@@ -35,20 +35,20 @@ def _build_cu_seqlens(lengths: list[int], device: str) -> torch.Tensor:
     return torch.tensor(out, dtype=torch.int32, device=device)
 
 
-def _build_dense_varlen_case(seq_len: int, head_dim: int):
+def _build_dense_varlen_case(seq_len: int, head_dim: int, dtype: torch.dtype):
     batch = 2
     device = "cuda"
     q_lens = [seq_len] * batch
     k_lens = [seq_len] * batch
-    q = torch.randn(sum(q_lens), Q_HEADS, head_dim, dtype=DTYPE, device=device)
-    k = torch.randn(sum(k_lens), KV_HEADS, head_dim, dtype=DTYPE, device=device)
-    v = torch.randn(sum(k_lens), KV_HEADS, head_dim, dtype=DTYPE, device=device)
+    q = torch.randn(sum(q_lens), Q_HEADS, head_dim, dtype=dtype, device=device)
+    k = torch.randn(sum(k_lens), KV_HEADS, head_dim, dtype=dtype, device=device)
+    v = torch.randn(sum(k_lens), KV_HEADS, head_dim, dtype=dtype, device=device)
     cu_q = _build_cu_seqlens(q_lens, device)
     cu_k = _build_cu_seqlens(k_lens, device)
     return q, k, v, cu_q, cu_k
 
 
-def _build_paged_varlen_case(seq_len: int, head_dim: int):
+def _build_paged_varlen_case(seq_len: int, head_dim: int, dtype: torch.dtype):
     batch = 2
     device = "cuda"
 
@@ -57,7 +57,7 @@ def _build_paged_varlen_case(seq_len: int, head_dim: int):
 
     num_blocks_per_seq = (seq_len + PAGED_BLOCK_SIZE - 1) // PAGED_BLOCK_SIZE
     total_blocks = batch * num_blocks_per_seq
-    q, dense_k, dense_v, cu_q, cu_k = _build_dense_varlen_case(seq_len, head_dim)
+    q, dense_k, dense_v, cu_q, cu_k = _build_dense_varlen_case(seq_len, head_dim, dtype)
     dense_k = dense_k.view(batch, seq_len, KV_HEADS, head_dim)
     dense_v = dense_v.view(batch, seq_len, KV_HEADS, head_dim)
     k = torch.zeros(
@@ -65,7 +65,7 @@ def _build_paged_varlen_case(seq_len: int, head_dim: int):
         PAGED_BLOCK_SIZE,
         KV_HEADS,
         head_dim,
-        dtype=DTYPE,
+        dtype=dtype,
         device=device,
     )
     v = torch.zeros_like(k)
@@ -84,24 +84,43 @@ def _build_paged_varlen_case(seq_len: int, head_dim: int):
     return q, k, v, cu_q, cu_k, block_table
 
 
-def _assert_output_matches(out_man: torch.Tensor, out_ref: torch.Tensor, expected_shape: torch.Size) -> None:
+def _assert_output_matches(
+    out_man: torch.Tensor,
+    out_ref: torch.Tensor,
+    expected_shape: torch.Size,
+    *,
+    dtype: torch.dtype,
+    path: str,
+    head_dim: int,
+    seq_len: int,
+) -> None:
     assert out_man.shape == expected_shape
     assert out_ref.shape == expected_shape
-    assert out_man.dtype == DTYPE
-    assert out_ref.dtype == DTYPE
+    assert out_man.dtype == dtype
+    assert out_ref.dtype == dtype
     assert out_man.shape == out_ref.shape
     assert out_man.dtype == out_ref.dtype
-    torch.testing.assert_close(out_man, out_ref, atol=1e-2, rtol=1e-2)
+    diff = (out_man - out_ref).abs().float()
+    max_abs_error = float(diff.max().item()) if diff.numel() > 0 else 0.0
+    mean_abs_error = float(diff.mean().item()) if diff.numel() > 0 else 0.0
+    allclose = torch.allclose(out_man, out_ref, atol=1e-2, rtol=1e-2)
+    assert allclose, (
+        f"{path} mismatch: dtype={dtype}, head_dim={head_dim}, seq_len={seq_len}, "
+        f"atol=1e-2, rtol=1e-2, max_abs_error={max_abs_error:.6f}, mean_abs_error={mean_abs_error:.6f}"
+    )
 
 
+@pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("head_dim", SUPPORTED_HEAD_DIMS)
 @pytest.mark.parametrize("seq_len", ALIGNED_SIZES)
-def test_varlen_man_matches_flash_attn_for_dense_kv(seq_len, head_dim):
+def test_varlen_man_matches_flash_attn_for_dense_kv(seq_len, head_dim, dtype):
     _require_cuda()
+    if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+        pytest.skip("bf16 is not supported on this GPU")
     _seed()
 
     softmax_scale = 1.0 / math.sqrt(head_dim)
-    q, k, v, cu_q, cu_k = _build_dense_varlen_case(seq_len, head_dim)
+    q, k, v, cu_q, cu_k = _build_dense_varlen_case(seq_len, head_dim, dtype)
     out_man = fa2_varlen_fwd_man(
         q,
         k,
@@ -126,17 +145,28 @@ def test_varlen_man_matches_flash_attn_for_dense_kv(seq_len, head_dim):
         causal=True,
         block_table=None,
     )
-    _assert_output_matches(out_man, out_ref, q.shape)
+    _assert_output_matches(
+        out_man,
+        out_ref,
+        q.shape,
+        dtype=dtype,
+        path="dense",
+        head_dim=head_dim,
+        seq_len=seq_len,
+    )
 
 
+@pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("head_dim", SUPPORTED_HEAD_DIMS)
 @pytest.mark.parametrize("seq_len", ALIGNED_SIZES)
-def test_varlen_man_matches_official_path_for_paged_kv(seq_len, head_dim):
+def test_varlen_man_matches_official_path_for_paged_kv(seq_len, head_dim, dtype):
     _require_cuda()
+    if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+        pytest.skip("bf16 is not supported on this GPU")
     _seed()
 
     softmax_scale = 1.0 / math.sqrt(head_dim)
-    q, k, v, cu_q, cu_k, block_table = _build_paged_varlen_case(seq_len, head_dim)
+    q, k, v, cu_q, cu_k, block_table = _build_paged_varlen_case(seq_len, head_dim, dtype)
     out_man = fa2_varlen_fwd_man(
         q,
         k,
@@ -161,7 +191,15 @@ def test_varlen_man_matches_official_path_for_paged_kv(seq_len, head_dim):
         causal=True,
         softmax_scale=softmax_scale,
     )
-    _assert_output_matches(out_man, out_ref, q.shape)
+    _assert_output_matches(
+        out_man,
+        out_ref,
+        q.shape,
+        dtype=dtype,
+        path="paged",
+        head_dim=head_dim,
+        seq_len=seq_len,
+    )
 
 
 def test_varlen_man_rejects_unsupported_head_dim():
@@ -169,7 +207,7 @@ def test_varlen_man_rejects_unsupported_head_dim():
     _seed()
 
     head_dim = 96
-    q, k, v, cu_q, cu_k = _build_dense_varlen_case(seq_len=64, head_dim=head_dim)
+    q, k, v, cu_q, cu_k = _build_dense_varlen_case(seq_len=64, head_dim=head_dim, dtype=torch.float16)
     with pytest.raises((ValueError, RuntimeError), match="head_dim|supports"):
         fa2_varlen_fwd_man(
             q,
