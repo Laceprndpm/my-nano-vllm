@@ -37,7 +37,7 @@ __device__ inline __nv_bfloat16 from_float<__nv_bfloat16>(float x) {
   return __float2bfloat16_rn(x);
 }
 
-template <typename scalar_t>
+template <typename scalar_t, int kHeadDim>
 __global__ void fa2_varlen_fwd_kernel(
     const scalar_t* __restrict__ q,
     const scalar_t* __restrict__ k,
@@ -50,7 +50,6 @@ __global__ void fa2_varlen_fwd_kernel(
     int batch,
     int q_heads,
     int kv_heads,
-    int head_dim,
     int32_t block_table_cols,
     int32_t block_size,
     float softmax_scale,
@@ -95,16 +94,16 @@ __global__ void fa2_varlen_fwd_kernel(
   // valid key positions satisfy kj <= (k_len - q_len) + q_local.
   int32_t causal_limit = (k_len - q_len) + q_local;
 
-  const scalar_t* q_vec = q + (static_cast<int64_t>(q_idx) * q_heads + q_head) * head_dim;
+  const scalar_t* q_vec = q + (static_cast<int64_t>(q_idx) * q_heads + q_head) * kHeadDim;
 
   // NOTE:
   // Online softmax state:
   // m = running max logit, l = running denominator, acc = running weighted sum.
   float m = -INFINITY;
   float l = 0.0f;
-  float acc[64];
+  float acc[kHeadDim];
 #pragma unroll
-  for (int i = 0; i < 64; ++i) {
+  for (int i = 0; i < kHeadDim; ++i) {
     acc[i] = 0.0f;
   }
 
@@ -127,21 +126,21 @@ __global__ void fa2_varlen_fwd_kernel(
         continue;
       }
       int64_t base = (static_cast<int64_t>(block_id) * block_size + in_block) * kv_heads + kv_head;
-      k_vec = k + base * head_dim;
-      v_vec = v + base * head_dim;
+      k_vec = k + base * kHeadDim;
+      v_vec = v + base * kHeadDim;
     } else {
       // NOTE:
       // Dense varlen KV path:
       // use cu_seqlens_k to map local key index to flattened k/v index.
       int64_t key_index = k_start + kj;
       int64_t base = key_index * kv_heads + kv_head;
-      k_vec = k + base * head_dim;
-      v_vec = v + base * head_dim;
+      k_vec = k + base * kHeadDim;
+      v_vec = v + base * kHeadDim;
     }
 
     float score = 0.0f;
 #pragma unroll
-    for (int d = 0; d < 64; ++d) {
+    for (int d = 0; d < kHeadDim; ++d) {
       score += to_float<scalar_t>(q_vec[d]) * to_float<scalar_t>(k_vec[d]);
     }
     score *= softmax_scale;
@@ -155,7 +154,7 @@ __global__ void fa2_varlen_fwd_kernel(
     float alpha = __expf(m - m_new);
     float beta = __expf(score - m_new);
 #pragma unroll
-    for (int d = 0; d < 64; ++d) {
+    for (int d = 0; d < kHeadDim; ++d) {
       acc[d] = acc[d] * alpha + to_float<scalar_t>(v_vec[d]) * beta;
     }
     l = l * alpha + beta;
@@ -164,9 +163,9 @@ __global__ void fa2_varlen_fwd_kernel(
 
   // NOTE: normalize by final denominator to produce attention output.
   float inv_l = l > 0.0f ? (1.0f / l) : 0.0f;
-  scalar_t* out_vec = out + (static_cast<int64_t>(q_idx) * q_heads + q_head) * head_dim;
+  scalar_t* out_vec = out + (static_cast<int64_t>(q_idx) * q_heads + q_head) * kHeadDim;
 #pragma unroll
-  for (int d = 0; d < 64; ++d) {
+  for (int d = 0; d < kHeadDim; ++d) {
     out_vec[d] = from_float<scalar_t>(acc[d] * inv_l);
   }
 }
@@ -186,7 +185,7 @@ torch::Tensor fa2_varlen_fwd_cuda_impl(
     double softmax_scale) {
   // NOTE:
   // Minimal API contract checks. This implementation currently focuses on a
-  // correctness-first path for head_dim=64 and 64-aligned max seqlens.
+  // correctness-first path for head_dim=64/128 and 64-aligned max seqlens.
   TORCH_CHECK(q.is_cuda() && k.is_cuda() && v.is_cuda(), "q, k, v must be CUDA tensors");
   TORCH_CHECK(cu_seqlens_q.is_cuda() && cu_seqlens_k.is_cuda(), "cu_seqlens must be CUDA tensors");
   TORCH_CHECK(block_table.is_cuda(), "block_table must be CUDA tensor");
@@ -197,7 +196,8 @@ torch::Tensor fa2_varlen_fwd_cuda_impl(
   TORCH_CHECK(cu_seqlens_q.scalar_type() == torch::kInt32 && cu_seqlens_k.scalar_type() == torch::kInt32, "cu_seqlens must be int32");
   TORCH_CHECK(cu_seqlens_q.dim() == 1 && cu_seqlens_k.dim() == 1, "cu_seqlens must be rank-1");
   TORCH_CHECK(cu_seqlens_q.numel() == cu_seqlens_k.numel(), "cu_seqlens size mismatch");
-  TORCH_CHECK(q.size(2) == 64, "minimal varlen kernel currently supports head_dim=64 only");
+  TORCH_CHECK(q.size(2) == 64 || q.size(2) == 128,
+              "minimal varlen kernel currently supports head_dim in {64, 128}");
   TORCH_CHECK(max_seqlen_q % 64 == 0 && max_seqlen_k % 64 == 0,
               "minimal varlen kernel requires max_seqlen_q/max_seqlen_k aligned to 64");
 
@@ -208,11 +208,13 @@ torch::Tensor fa2_varlen_fwd_cuda_impl(
     TORCH_CHECK(v.dim() == 4, "paged-KV mode expects v as [num_blocks, block_size, kv_heads, head_dim]");
     TORCH_CHECK(block_table.dim() == 2, "block_table must be rank-2");
     TORCH_CHECK(block_table.scalar_type() == torch::kInt32, "block_table must be int32");
-    TORCH_CHECK(k.size(3) == 64 && v.size(3) == 64, "head_dim mismatch in paged k/v");
+    TORCH_CHECK((k.size(3) == 64 || k.size(3) == 128) && k.size(3) == q.size(2) && v.size(3) == q.size(2),
+                "head_dim mismatch in paged k/v");
   } else {
     // NOTE: dense varlen KV layout: [total_k, kv_heads, head_dim].
     TORCH_CHECK(k.dim() == 3 && v.dim() == 3, "non-paged mode expects k/v as [total_k, kv_heads, head_dim]");
-    TORCH_CHECK(k.size(2) == 64 && v.size(2) == 64, "head_dim mismatch in k/v");
+    TORCH_CHECK((k.size(2) == 64 || k.size(2) == 128) && k.size(2) == q.size(2) && v.size(2) == q.size(2),
+                "head_dim mismatch in k/v");
   }
 
   auto q_ = q.contiguous();
@@ -243,44 +245,87 @@ torch::Tensor fa2_varlen_fwd_cuda_impl(
   int blocks = (total_work + threads - 1) / threads;
 
   auto stream = at::cuda::getDefaultCUDAStream();
+  const int head_dim = static_cast<int>(q_.size(2));
   if (q_.scalar_type() == torch::kFloat16) {
-    fa2_varlen_fwd_kernel<__half><<<blocks, threads, 0, stream>>>(
-        reinterpret_cast<const __half*>(q_.data_ptr()),
-        reinterpret_cast<const __half*>(k_.data_ptr()),
-        reinterpret_cast<const __half*>(v_.data_ptr()),
-        cu_q_.data_ptr<int32_t>(),
-        cu_k_.data_ptr<int32_t>(),
-        bt_.numel() > 0 ? bt_.data_ptr<int32_t>() : nullptr,
-        reinterpret_cast<__half*>(out.data_ptr()),
-        total_q,
-        batch,
-        q_heads,
-        kv_heads,
-        64,
-        block_table_cols,
-        block_size,
-        static_cast<float>(softmax_scale),
-        causal,
-        paged_kv);
+    if (head_dim == 64) {
+      fa2_varlen_fwd_kernel<__half, 64><<<blocks, threads, 0, stream>>>(
+          reinterpret_cast<const __half*>(q_.data_ptr()),
+          reinterpret_cast<const __half*>(k_.data_ptr()),
+          reinterpret_cast<const __half*>(v_.data_ptr()),
+          cu_q_.data_ptr<int32_t>(),
+          cu_k_.data_ptr<int32_t>(),
+          bt_.numel() > 0 ? bt_.data_ptr<int32_t>() : nullptr,
+          reinterpret_cast<__half*>(out.data_ptr()),
+          total_q,
+          batch,
+          q_heads,
+          kv_heads,
+          block_table_cols,
+          block_size,
+          static_cast<float>(softmax_scale),
+          causal,
+          paged_kv);
+    } else if (head_dim == 128) {
+      fa2_varlen_fwd_kernel<__half, 128><<<blocks, threads, 0, stream>>>(
+          reinterpret_cast<const __half*>(q_.data_ptr()),
+          reinterpret_cast<const __half*>(k_.data_ptr()),
+          reinterpret_cast<const __half*>(v_.data_ptr()),
+          cu_q_.data_ptr<int32_t>(),
+          cu_k_.data_ptr<int32_t>(),
+          bt_.numel() > 0 ? bt_.data_ptr<int32_t>() : nullptr,
+          reinterpret_cast<__half*>(out.data_ptr()),
+          total_q,
+          batch,
+          q_heads,
+          kv_heads,
+          block_table_cols,
+          block_size,
+          static_cast<float>(softmax_scale),
+          causal,
+          paged_kv);
+    } else {
+      TORCH_CHECK(false, "unsupported head_dim for fp16 varlen kernel: ", head_dim);
+    }
   } else {
-    fa2_varlen_fwd_kernel<__nv_bfloat16><<<blocks, threads, 0, stream>>>(
-        reinterpret_cast<const __nv_bfloat16*>(q_.data_ptr()),
-        reinterpret_cast<const __nv_bfloat16*>(k_.data_ptr()),
-        reinterpret_cast<const __nv_bfloat16*>(v_.data_ptr()),
-        cu_q_.data_ptr<int32_t>(),
-        cu_k_.data_ptr<int32_t>(),
-        bt_.numel() > 0 ? bt_.data_ptr<int32_t>() : nullptr,
-        reinterpret_cast<__nv_bfloat16*>(out.data_ptr()),
-        total_q,
-        batch,
-        q_heads,
-        kv_heads,
-        64,
-        block_table_cols,
-        block_size,
-        static_cast<float>(softmax_scale),
-        causal,
-        paged_kv);
+    if (head_dim == 64) {
+      fa2_varlen_fwd_kernel<__nv_bfloat16, 64><<<blocks, threads, 0, stream>>>(
+          reinterpret_cast<const __nv_bfloat16*>(q_.data_ptr()),
+          reinterpret_cast<const __nv_bfloat16*>(k_.data_ptr()),
+          reinterpret_cast<const __nv_bfloat16*>(v_.data_ptr()),
+          cu_q_.data_ptr<int32_t>(),
+          cu_k_.data_ptr<int32_t>(),
+          bt_.numel() > 0 ? bt_.data_ptr<int32_t>() : nullptr,
+          reinterpret_cast<__nv_bfloat16*>(out.data_ptr()),
+          total_q,
+          batch,
+          q_heads,
+          kv_heads,
+          block_table_cols,
+          block_size,
+          static_cast<float>(softmax_scale),
+          causal,
+          paged_kv);
+    } else if (head_dim == 128) {
+      fa2_varlen_fwd_kernel<__nv_bfloat16, 128><<<blocks, threads, 0, stream>>>(
+          reinterpret_cast<const __nv_bfloat16*>(q_.data_ptr()),
+          reinterpret_cast<const __nv_bfloat16*>(k_.data_ptr()),
+          reinterpret_cast<const __nv_bfloat16*>(v_.data_ptr()),
+          cu_q_.data_ptr<int32_t>(),
+          cu_k_.data_ptr<int32_t>(),
+          bt_.numel() > 0 ? bt_.data_ptr<int32_t>() : nullptr,
+          reinterpret_cast<__nv_bfloat16*>(out.data_ptr()),
+          total_q,
+          batch,
+          q_heads,
+          kv_heads,
+          block_table_cols,
+          block_size,
+          static_cast<float>(softmax_scale),
+          causal,
+          paged_kv);
+    } else {
+      TORCH_CHECK(false, "unsupported head_dim for bf16 varlen kernel: ", head_dim);
+    }
   }
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();

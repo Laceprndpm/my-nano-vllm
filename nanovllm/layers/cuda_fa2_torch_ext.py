@@ -194,6 +194,8 @@ def fa2_varlen_fwd_man(
         max_seqlen_k=max_seqlen_k,
         block_table=block_table,
     )
+    if q.size(-1) not in (64, 128):
+        raise ValueError(f"fa2_varlen_fwd_man currently supports head_dim in {{64, 128}}, got {q.size(-1)}")
 
     ext = load_cuda_fa2_extension()
     return ext.fa2_varlen_fwd(
