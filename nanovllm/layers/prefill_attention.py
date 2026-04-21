@@ -26,6 +26,8 @@ _BATCH_MAN_PAD64_WARNING_EMITTED = False
 _VARLEN_MAN_PAD64_WARNING_EMITTED = False
 _BATCH_DEBUG_ATOL = 1e-2
 _BATCH_DEBUG_RTOL = 1e-2
+_VARLEN_DEBUG_ATOL = 1e-2
+_VARLEN_DEBUG_RTOL = 1e-2
 
 
 def _nvtx_enabled() -> bool:
@@ -418,6 +420,63 @@ def _run_cuda_varlen_fa2_man(
     )
 
 
+def _run_cuda_varlen_fa2_debug(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    max_seqlen_q: int,
+    cu_seqlens_q: torch.Tensor,
+    max_seqlen_k: int,
+    cu_seqlens_k: torch.Tensor,
+    block_table: torch.Tensor,
+    softmax_scale: float,
+    causal: bool,
+) -> torch.Tensor:
+    """调试路径：同时运行 varlen_man 和 varlen_official 并断言输出一致。"""
+    out_man = _run_cuda_varlen_fa2_man(
+        q,
+        k,
+        v,
+        max_seqlen_q=max_seqlen_q,
+        cu_seqlens_q=cu_seqlens_q,
+        max_seqlen_k=max_seqlen_k,
+        cu_seqlens_k=cu_seqlens_k,
+        block_table=block_table,
+        softmax_scale=softmax_scale,
+        causal=causal,
+    )
+    out_official = _run_cuda_varlen_fa2_official(
+        q,
+        k,
+        v,
+        max_seqlen_q=max_seqlen_q,
+        cu_seqlens_q=cu_seqlens_q,
+        max_seqlen_k=max_seqlen_k,
+        cu_seqlens_k=cu_seqlens_k,
+        block_table=block_table,
+        softmax_scale=softmax_scale,
+        causal=causal,
+    )
+    if out_man.shape != out_official.shape:
+        raise AssertionError(
+            "varlen_debug mismatch: shape differs between varlen_man and varlen_official "
+            f"(man={tuple(out_man.shape)}, official={tuple(out_official.shape)})"
+        )
+    diff = (out_man - out_official).abs()
+    max_abs_error = float(diff.max().item()) if diff.numel() > 0 else 0.0
+    mean_abs_error = float(diff.mean().item()) if diff.numel() > 0 else 0.0
+    allclose = torch.allclose(out_man, out_official, atol=_VARLEN_DEBUG_ATOL, rtol=_VARLEN_DEBUG_RTOL)
+    if not allclose:
+        raise AssertionError(
+            "varlen_debug mismatch between varlen_man and varlen_official: "
+            f"shape={tuple(out_man.shape)}, dtype={out_man.dtype}, device={out_man.device}, "
+            f"atol={_VARLEN_DEBUG_ATOL}, rtol={_VARLEN_DEBUG_RTOL}, "
+            f"max_abs_error={max_abs_error:.6f}, mean_abs_error={mean_abs_error:.6f}"
+        )
+    return out_man
+
+
 def _run_cuda_fwd_placeholder(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -546,6 +605,20 @@ def run_prefill_attention(
             if mode == "varlen_man":
                 required_block_table = _normalize_block_table_required(cu_seqlens_q=cu_seqlens_q, block_table=block_table)
                 return _run_cuda_varlen_fa2_man(
+                    q,
+                    k,
+                    v,
+                    max_seqlen_q=max_seqlen_q,
+                    cu_seqlens_q=cu_seqlens_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_k=cu_seqlens_k,
+                    block_table=required_block_table,
+                    softmax_scale=softmax_scale,
+                    causal=causal,
+                )
+            if mode == "varlen_debug":
+                required_block_table = _normalize_block_table_required(cu_seqlens_q=cu_seqlens_q, block_table=block_table)
+                return _run_cuda_varlen_fa2_debug(
                     q,
                     k,
                     v,

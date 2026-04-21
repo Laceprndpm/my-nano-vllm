@@ -10,6 +10,7 @@ Keep both batch-view and varlen FA2 paths available behind one runtime mode swit
 - Supported mode values:
   - `varlen_official`
   - `varlen_man`
+  - `varlen_debug`
   - `batch_official`
   - `batch_man`
   - `batch_debug`
@@ -25,6 +26,7 @@ Keep both batch-view and varlen FA2 paths available behind one runtime mode swit
 - `batch_debug`: debug mode; run both `batch_man` and `batch_official`, then assert diff within threshold.
 - `varlen_official`: varlen API path via `fa2_varlen_fwd_official` (flash-attn varlen reference).
 - `varlen_man`: handwritten CUDA varlen path via torch extension symbol `fa2_varlen_fwd`.
+- `varlen_debug`: debug mode; run both `varlen_man` and `varlen_official`, then assert diff within threshold.
 - `varlen_man` currently applies Python-side max-seqlen align-to-64 hotfix before kernel launch.
 
 ### Mode Matrix
@@ -32,6 +34,7 @@ Keep both batch-view and varlen FA2 paths available behind one runtime mode swit
 |---|---|---|
 | `varlen_official` | `_run_cuda_varlen_fa2_official` | `flash_attn_varlen_func` placeholder via wrapper |
 | `varlen_man` | `_run_cuda_varlen_fa2_man` | handwritten torch bind `fa2_varlen_fwd` with temporary max-seqlen align-to-64 hotfix and `[WARNING][FA2_VARLEN_MAN_PAD64]` |
+| `varlen_debug` | `_run_cuda_varlen_fa2_debug` | run `varlen_man` + `varlen_official`, compare varlen outputs with `allclose(atol=1e-2, rtol=1e-2)`, raise on mismatch |
 | `batch_official` | `_run_cuda_batch_fa2_official` | `flash_attn_func` per-sequence batch-view |
 | `batch_man` | `_run_cuda_batch_fa2_man` | handwritten torch bind `fa2_batch_fwd` per-sequence batch-view with temporary Python pad-to-64 hotfix and `[WARNING][FA2_BATCH_MAN_PAD64]` |
 | `batch_debug` | `_run_cuda_batch_fa2_debug` | run `batch_man` + `batch_official`, compare varlen outputs with `allclose(atol=1e-2, rtol=1e-2)`, raise on mismatch |
@@ -72,6 +75,7 @@ mode_env:
   values:
     - varlen_official
     - varlen_man
+    - varlen_debug
     - batch_official
     - batch_man
     - batch_debug
@@ -120,6 +124,7 @@ outputs:
 routing:
   varlen_official: flash_attn_varlen_func_placeholder
   varlen_man: handwritten_fa2_varlen_fwd_with_python_max_seqlen_align64_hotfix
+  varlen_debug: compare_varlen_man_vs_varlen_official_and_assert_allclose
   batch_official: flash_attn_func_batch_view
   batch_man: handwritten_fa2_fwd_batch_view_with_python_pad64_hotfix
   batch_debug: compare_batch_man_vs_batch_official_and_assert_allclose

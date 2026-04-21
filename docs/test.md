@@ -6,9 +6,10 @@ This file tracks the FA2-related test suites and what they validate.
 
 | Test file | Category | Key checks |
 |---|---|---|
-| `tests/test_prefill_attention_mode_routing.py` | Routing / mode switch | `NANOVLLM_FA2_MODE` dispatch for `varlen_official`, `varlen_man`, `batch_official`, `batch_man`, `batch_debug`; varlen block_table normalization contract |
+| `tests/test_prefill_attention_mode_routing.py` | Routing / mode switch | `NANOVLLM_FA2_MODE` dispatch for `varlen_official`, `varlen_man`, `varlen_debug`, `batch_official`, `batch_man`, `batch_debug`; varlen block_table normalization contract |
 | `tests/test_batch_man_correctness.py` | Batch-man correctness | handwritten batch kernel vs SDPA across shape matrix, dtype matrix (`fp16`/`bf16`) |
 | `tests/test_batch_debug_mode.py` | Batch-debug behavior | debug mode runs `batch_man` + `batch_official`, returns man output on close match, raises on diff, rejects non-empty `block_table` |
+| `tests/test_varlen_debug_mode.py` | Varlen-debug behavior | debug mode runs `varlen_man` + `varlen_official`, returns man output on close match, raises on diff/shape mismatch, and validates varlen_debug mode dispatch |
 | `tests/test_varlen_api_contract.py` | Varlen API contract | `fa2_varlen_fwd` argument validation (`block_table`, batch dim, dtypes) and output match vs `flash_attn_varlen_func` on empty block table |
 | `tests/test_varlen_man_correctness.py` | Varlen-man correctness | handwritten varlen kernel vs reference on dense/paged paths across `head_dim={64,128}` and dtype matrix (`fp16`/`bf16`) |
 | `tests/test_varlen_man_pad64_hotfix.py` | Varlen-man hotfix | non-64 max seqlen triggers align-to-64 + `[WARNING][FA2_VARLEN_MAN_PAD64]`; aligned max seqlen does not warn |
@@ -41,6 +42,7 @@ This file tracks the FA2-related test suites and what they validate.
 - batch_man temporary pad64 hotfix emits warning on unaligned shapes
 - varlen_man temporary max-seqlen align hotfix emits warning on unaligned shapes
 - batch_debug compares handwritten and official batch outputs and fails fast on mismatch
+- varlen_debug compares handwritten and official varlen outputs and fails fast on mismatch
 - flash-attn numerical agreement includes `N=64/128/192/512/1024` (separate from batch_man hotfix contract tests)
 
 ## Run commands
@@ -48,6 +50,7 @@ This file tracks the FA2-related test suites and what they validate.
 ```bash
 python3 -m pytest -q tests/test_prefill_attention_mode_routing.py
 python3 -m pytest -q tests/test_batch_man_correctness.py
+python3 -m pytest -q tests/test_varlen_debug_mode.py
 python3 -m pytest -q tests/test_varlen_api_contract.py
 python3 -m pytest -q tests/test_varlen_man_correctness.py
 python3 -m pytest -q tests/test_varlen_man_pad64_hotfix.py
