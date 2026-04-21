@@ -9,18 +9,18 @@ This backlog tracks test-suite cleanup and coverage hardening for FA2 modes and 
 ### P0-0: Implement `varlen_man` handwritten CUDA path
 - Priority: P0
 - Owner: TBD
-- Status: TODO
-- Why: `varlen_man` is still a placeholder forwarding to official varlen path, so the handwritten varlen backend is not actually implemented yet.
-- Exit Condition: `NANOVLLM_FA2_MODE=varlen_man` executes handwritten CUDA varlen forward end-to-end (no placeholder forwarding), with correctness tests against reference path and routing/docs updated.
+- Status: DONE
+- Why: `varlen_man` now routes to handwritten CUDA varlen forward end-to-end, with dedicated correctness and pad64-hotfix tests.
+- Exit Condition: Satisfied (`NANOVLLM_FA2_MODE=varlen_man` no longer forwards to official path).
 
 ## Priority Queue
 
 ### P0-1: Merge BF16 diagnosis into main correctness matrix
 - Priority: P0
 - Owner: TBD
-- Status: TODO
-- Why: `test_batch_man_bf16_diagnosis.py` overlaps with core correctness intent and should be unified.
-- Exit Condition: `test_batch_man_correctness.py` is dtype-parameterized (`fp16`/`bf16`), and standalone diagnosis-only checks are removed or minimized.
+- Status: DONE
+- Why: Batch correctness matrix is now dtype-parameterized (`fp16`/`bf16`) in one file.
+- Exit Condition: Satisfied (`test_batch_man_bf16_diagnosis.py` removed, coverage merged into `test_batch_man_correctness.py`).
 
 ### P0-2: Expand batch-man correctness shape coverage
 - Priority: P0

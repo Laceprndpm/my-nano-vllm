@@ -7,7 +7,7 @@ from nanovllm.layers.cuda_fa2_torch_ext import fa2_batch_fwd
 torch.manual_seed(514)
 
 DEVICE = "cuda"
-DTYPE = torch.float16
+DTYPES = [torch.float16, torch.bfloat16]
 
 
 def sdpa_ref(q, k, v, causal=True):
@@ -30,10 +30,10 @@ def kernel_ref(q, k, v, causal=True):
     return o_.transpose(1, 2).contiguous()
 
 
-def run_case(B, H, N, D):
-    q = torch.randn(B, H, N, D, device=DEVICE, dtype=DTYPE)
-    k = torch.randn(B, H, N, D, device=DEVICE, dtype=DTYPE)
-    v = torch.randn(B, H, N, D, device=DEVICE, dtype=DTYPE)
+def run_case(B, H, N, D, dtype: torch.dtype):
+    q = torch.randn(B, H, N, D, device=DEVICE, dtype=dtype)
+    k = torch.randn(B, H, N, D, device=DEVICE, dtype=dtype)
+    v = torch.randn(B, H, N, D, device=DEVICE, dtype=dtype)
 
     out_sdpa = sdpa_ref(q, k, v, causal=True)
     out_kernel = kernel_ref(q, k, v, causal=True)
@@ -46,7 +46,7 @@ def run_case(B, H, N, D):
     return max_abs_error, mean_abs_error, allclose
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+@pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize(
     "B,H,N,D",
     [
@@ -56,9 +56,14 @@ def run_case(B, H, N, D):
         (1, 8, 512, 64),
     ],
 )
-def test_kernel_matches_sdpa(B, H, N, D):
-    max_abs_error, mean_abs_error, allclose = run_case(B, H, N, D)
+def test_kernel_matches_sdpa(B, H, N, D, dtype):
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required")
+    if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+        pytest.skip("bf16 is not supported on this GPU")
+
+    max_abs_error, mean_abs_error, allclose = run_case(B, H, N, D, dtype)
     assert allclose, (
-        f"kernel mismatch for B={B}, H={H}, N={N}, D={D}: "
+        f"kernel mismatch for dtype={dtype}, B={B}, H={H}, N={N}, D={D}: "
         f"max_abs_error={max_abs_error:.6f}, mean_abs_error={mean_abs_error:.6f}"
     )

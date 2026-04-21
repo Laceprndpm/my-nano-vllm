@@ -32,7 +32,7 @@ def test_varlen_man_pad64_emits_warning_and_aligns_max_seqlen(monkeypatch):
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        out = prefill_attention._run_cuda_varlen_fa2_man_placeholder(
+        out = prefill_attention._run_cuda_varlen_fa2_man(
             q,
             k,
             v,
@@ -71,7 +71,7 @@ def test_varlen_man_no_warning_when_max_seqlen_aligned(monkeypatch):
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        out = prefill_attention._run_cuda_varlen_fa2_man_placeholder(
+        out = prefill_attention._run_cuda_varlen_fa2_man(
             q,
             k,
             v,

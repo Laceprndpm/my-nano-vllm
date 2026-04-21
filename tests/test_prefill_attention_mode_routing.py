@@ -25,7 +25,7 @@ def _sample_inputs():
     "mode,expected_handler",
     [
         ("varlen_official", "_run_cuda_varlen_fa2_official"),
-        ("varlen_man", "_run_cuda_varlen_fa2_man_placeholder"),
+        ("varlen_man", "_run_cuda_varlen_fa2_man"),
         ("batch_official", "_run_cuda_batch_fa2_official"),
         ("batch_man", "_run_cuda_batch_fa2_man"),
         ("batch_debug", "_run_cuda_batch_fa2_debug"),
@@ -45,7 +45,7 @@ def test_nanovllm_fa2_mode_routing_dispatches_expected_handler(monkeypatch, mode
         return _stub
 
     monkeypatch.setattr(prefill_attention, "_run_cuda_varlen_fa2_official", _make_stub("_run_cuda_varlen_fa2_official"))
-    monkeypatch.setattr(prefill_attention, "_run_cuda_varlen_fa2_man_placeholder", _make_stub("_run_cuda_varlen_fa2_man_placeholder"))
+    monkeypatch.setattr(prefill_attention, "_run_cuda_varlen_fa2_man", _make_stub("_run_cuda_varlen_fa2_man"))
     monkeypatch.setattr(prefill_attention, "_run_cuda_batch_fa2_official", _make_stub("_run_cuda_batch_fa2_official"))
     monkeypatch.setattr(prefill_attention, "_run_cuda_batch_fa2_man", _make_stub("_run_cuda_batch_fa2_man"))
     monkeypatch.setattr(prefill_attention, "_run_cuda_batch_fa2_debug", _make_stub("_run_cuda_batch_fa2_debug"))

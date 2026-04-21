@@ -378,7 +378,7 @@ def _run_cuda_varlen_fa2_official(
     )
 
 
-def _run_cuda_varlen_fa2_man_placeholder(
+def _run_cuda_varlen_fa2_man(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -391,7 +391,7 @@ def _run_cuda_varlen_fa2_man_placeholder(
     softmax_scale: float,
     causal: bool,
 ) -> torch.Tensor:
-    """手写 CUDA varlen 路径（保留 placeholder 命名以兼容既有调用方）。"""
+    """手写 CUDA varlen 路径。"""
     global _VARLEN_MAN_PAD64_WARNING_EMITTED
     aligned_max_seqlen_q = ((max_seqlen_q + 63) // 64) * 64
     aligned_max_seqlen_k = ((max_seqlen_k + 63) // 64) * 64
@@ -545,7 +545,7 @@ def run_prefill_attention(
                 )
             if mode == "varlen_man":
                 required_block_table = _normalize_block_table_required(cu_seqlens_q=cu_seqlens_q, block_table=block_table)
-                return _run_cuda_varlen_fa2_man_placeholder(
+                return _run_cuda_varlen_fa2_man(
                     q,
                     k,
                     v,
