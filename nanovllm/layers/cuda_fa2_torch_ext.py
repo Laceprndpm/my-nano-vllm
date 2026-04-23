@@ -16,8 +16,16 @@ def _ext_root() -> str:
     return os.path.abspath(os.path.join(here, "..", "csrc", "fa2"))
 
 
+def _ensure_torch_cuda_arch_list_default() -> None:
+    # Local default for this workstation (RTX 4060 / sm_89).
+    # If caller already configured TORCH_CUDA_ARCH_LIST, respect it.
+    if not os.getenv("TORCH_CUDA_ARCH_LIST"):
+        os.environ["TORCH_CUDA_ARCH_LIST"] = "8.9"
+
+
 @lru_cache(maxsize=1)
 def load_cuda_fa2_extension():
+    _ensure_torch_cuda_arch_list_default()
     root = _ext_root()
     cpp_path = os.path.join(root, "fa2_binding.cpp")
     cu_path = os.path.join(root, "fa2_fwd.cu")
