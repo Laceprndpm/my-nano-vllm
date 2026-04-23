@@ -558,6 +558,19 @@ def _resolve_fa2_mode() -> str:
     return "batch_official"
 
 
+def _validate_fa2_mode(mode: str) -> None:
+    supported = {
+        "varlen_official",
+        "varlen_man",
+        "varlen_debug",
+        "batch_official",
+        "batch_man",
+        "batch_debug",
+    }
+    if mode not in supported:
+        raise ValueError(f"unsupported NANOVLLM_FA2_MODE: {mode}")
+
+
 def run_prefill_attention(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -586,10 +599,20 @@ def run_prefill_attention(
             block_table=block_table,
         )
     if _SETTINGS.backend == "cuda_fa2":
+        mode = _resolve_fa2_mode()
+        _validate_fa2_mode(mode)
+        is_debug_mode = mode.endswith("_debug")
+
+        # 配置/参数类错误不允许走 fallback：在 try 外做前置检查。
+        if mode.startswith("varlen"):
+            required_block_table = _normalize_block_table_required(cu_seqlens_q=cu_seqlens_q, block_table=block_table)
+        else:
+            if block_table is not None and block_table.numel() > 0:
+                raise RuntimeError(f"{mode} mode does not support non-empty block_table")
+            required_block_table = None
+
         try:
-            mode = _resolve_fa2_mode()
             if mode == "varlen_official":
-                required_block_table = _normalize_block_table_required(cu_seqlens_q=cu_seqlens_q, block_table=block_table)
                 return _run_cuda_varlen_fa2_official(
                     q,
                     k,
@@ -603,7 +626,6 @@ def run_prefill_attention(
                     causal=causal,
                 )
             if mode == "varlen_man":
-                required_block_table = _normalize_block_table_required(cu_seqlens_q=cu_seqlens_q, block_table=block_table)
                 return _run_cuda_varlen_fa2_man(
                     q,
                     k,
@@ -617,7 +639,6 @@ def run_prefill_attention(
                     causal=causal,
                 )
             if mode == "varlen_debug":
-                required_block_table = _normalize_block_table_required(cu_seqlens_q=cu_seqlens_q, block_table=block_table)
                 return _run_cuda_varlen_fa2_debug(
                     q,
                     k,
@@ -631,8 +652,6 @@ def run_prefill_attention(
                     causal=causal,
                 )
             if mode == "batch_official":
-                if block_table is not None and block_table.numel() > 0:
-                    raise RuntimeError("batch_official mode does not support non-empty block_table")
                 return _run_cuda_batch_fa2_official(
                     q,
                     k,
@@ -645,8 +664,6 @@ def run_prefill_attention(
                     causal=causal,
                 )
             if mode == "batch_man":
-                if block_table is not None and block_table.numel() > 0:
-                    raise RuntimeError("batch_man mode does not support non-empty block_table")
                 return _run_cuda_batch_fa2_man(
                     q,
                     k,
@@ -659,8 +676,6 @@ def run_prefill_attention(
                     causal=causal,
                 )
             if mode == "batch_debug":
-                if block_table is not None and block_table.numel() > 0:
-                    raise RuntimeError("batch_debug mode does not support non-empty block_table")
                 return _run_cuda_batch_fa2_debug(
                     q,
                     k,
@@ -672,9 +687,10 @@ def run_prefill_attention(
                     softmax_scale=softmax_scale,
                     causal=causal,
                 )
-            raise ValueError(f"unsupported NANOVLLM_FA2_MODE: {mode}")
-        except Exception:
-            if _SETTINGS.fallback_to_flash_attn:
+            # mode 已在进入分支前校验完，这里仅作为防御式兜底。
+            raise AssertionError(f"unreachable mode dispatch branch: {mode}")
+        except RuntimeError:
+            if _SETTINGS.fallback_to_flash_attn and not is_debug_mode:
                 return _direct_flash_attn_prefill(
                     q,
                     k,

@@ -19,6 +19,10 @@ Keep both batch-view and varlen FA2 paths available behind one runtime mode swit
 - Exclude advanced options: dropout/window/alibi/softcap/deterministic/attn-prob outputs.
 - `block_table` is required for varlen modes.
 - If no prefix cache is used, pass an empty CUDA `int32` tensor with shape `(batch, 0)`.
+- Fallback policy (`fallback_to_flash_attn`):
+  - only runtime backend execution errors (`RuntimeError`) are eligible for fallback.
+  - config/input errors (`ValueError`/validation failures) do not fallback.
+  - `batch_debug`/`varlen_debug` do not fallback on mismatches; assertions always raise.
 
 ### Current Implementation State
 - `batch_official`: batch-view + official flash-attn batch kernel path.

@@ -77,3 +77,34 @@ def test_batch_debug_mode_rejects_non_empty_block_table(monkeypatch):
             causal=True,
             block_table=torch.zeros((1, 1), dtype=torch.int32),
         )
+
+
+def test_batch_debug_assertion_does_not_fallback_when_enabled(monkeypatch):
+    q, k, v, cu_q, cu_k = _sample_inputs()
+    monkeypatch.setenv("NANOVLLM_FA2_MODE", "batch_debug")
+    prefill_attention.configure_prefill_attention_backend("cuda_fa2", True)
+
+    monkeypatch.setattr(
+        prefill_attention,
+        "_run_cuda_batch_fa2_debug",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("batch_debug mismatch")),
+    )
+    monkeypatch.setattr(
+        prefill_attention,
+        "_direct_flash_attn_prefill",
+        lambda *args, **kwargs: pytest.fail("unexpected fallback for batch_debug assertion"),
+    )
+
+    with pytest.raises(AssertionError, match="batch_debug mismatch"):
+        prefill_attention.run_prefill_attention(
+            q,
+            k,
+            v,
+            max_seqlen_q=3,
+            cu_seqlens_q=cu_q,
+            max_seqlen_k=3,
+            cu_seqlens_k=cu_k,
+            softmax_scale=1.0,
+            causal=True,
+            block_table=None,
+        )

@@ -123,3 +123,34 @@ def test_varlen_debug_mode_dispatches_from_run_prefill_attention(monkeypatch):
     assert "block_table" in calls[0]
     assert calls[0]["block_table"].dtype == torch.int32
     assert calls[0]["block_table"].shape == (1, 0)
+
+
+def test_varlen_debug_assertion_does_not_fallback_when_enabled(monkeypatch):
+    q, k, v, cu_q, cu_k, _ = _sample_inputs()
+    monkeypatch.setenv("NANOVLLM_FA2_MODE", "varlen_debug")
+    prefill_attention.configure_prefill_attention_backend("cuda_fa2", True)
+
+    monkeypatch.setattr(
+        prefill_attention,
+        "_run_cuda_varlen_fa2_debug",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("varlen_debug mismatch")),
+    )
+    monkeypatch.setattr(
+        prefill_attention,
+        "_direct_flash_attn_prefill",
+        lambda *args, **kwargs: pytest.fail("unexpected fallback for varlen_debug assertion"),
+    )
+
+    with pytest.raises(AssertionError, match="varlen_debug mismatch"):
+        prefill_attention.run_prefill_attention(
+            q,
+            k,
+            v,
+            max_seqlen_q=3,
+            cu_seqlens_q=cu_q,
+            max_seqlen_k=3,
+            cu_seqlens_k=cu_k,
+            softmax_scale=1.0,
+            causal=True,
+            block_table=None,
+        )
