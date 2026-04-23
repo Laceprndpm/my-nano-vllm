@@ -1,11 +1,11 @@
 # Project Status
 
-Last updated (UTC): 2026-04-21T16:40:00Z
+Last updated (UTC): 2026-04-23T00:00:00Z
 
 ## Snapshot
 - Branch: `varlen-fa2`
-- Latest commit: `89972df` (`fix GQA kv-head mapping in varlen_man kernel`)
-- Previous commit: `1b6d65d` (`add GQA varlen_man correctness regression tests`)
+- Latest commit: `714eec7` (`rewrite varlen_fwd to CUTE-tile kernel structure`)
+- Previous commit: `336d3dd` (`extract reusable flash helpers into common tools`)
 
 ## Completed Milestones
 - Added FA2 runtime mode switch (`NANOVLLM_FA2_MODE`) with:
@@ -31,6 +31,14 @@ Last updated (UTC): 2026-04-21T16:40:00Z
 ## Next Actions
 1. Replace Python align/pad hotfixes with kernel-level boundary/predicate fixes.
 2. Continue expanding correctness coverage (dtype/head_dim/shape/GQA) and keep `docs/test.md` in sync.
+
+## Audit Snapshot (2026-04-23)
+- Added audit artifacts:
+  - `docs/audit_acceptance.md`
+  - `docs/audit_report.md`
+  - `docs/audit_report.json`
+- Audit result: **Pass with risks** (`P0=0`, `P1=4`, `P2=6`).
+- Primary risks are doc-command correctness, fallback/debug semantics clarity, and stale status synchronization.
 
 ---
 Update rule:

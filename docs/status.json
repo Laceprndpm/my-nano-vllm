@@ -1,22 +1,22 @@
 {
-  "timestamp_utc": "2026-04-21T16:40:00Z",
+  "timestamp_utc": "2026-04-23T00:00:00Z",
   "branch": "varlen-fa2",
   "latest_commit": {
-    "hash": "89972df",
-    "message": "fix GQA kv-head mapping in varlen_man kernel"
+    "hash": "714eec7",
+    "message": "rewrite varlen_fwd to CUTE-tile kernel structure"
   },
   "recent_commits": [
     {
-      "hash": "89972df",
-      "message": "fix GQA kv-head mapping in varlen_man kernel"
+      "hash": "714eec7",
+      "message": "rewrite varlen_fwd to CUTE-tile kernel structure"
     },
     {
-      "hash": "1b6d65d",
-      "message": "add GQA varlen_man correctness regression tests"
+      "hash": "336d3dd",
+      "message": "extract reusable flash helpers into common tools"
     },
     {
-      "hash": "d475bb7",
-      "message": "add varlen_debug mode mirroring batch_debug"
+      "hash": "95941ea",
+      "message": "sync docs with current varlen-fa2 status"
     }
   ],
   "runtime_modes": {
@@ -46,5 +46,20 @@
   "next_actions": [
     "Replace Python align/pad hotfixes with kernel-level boundary/predicate fixes.",
     "Continue mode-matrix correctness and quality validation across dtype/head_dim/GQA."
-  ]
+  ],
+  "audit_snapshot": {
+    "date_utc": "2026-04-23T00:00:00Z",
+    "result": "pass_with_risks",
+    "counts": {
+      "P0": 0,
+      "P1": 4,
+      "P2": 6,
+      "INFO": 2
+    },
+    "artifacts": [
+      "docs/audit_acceptance.md",
+      "docs/audit_report.md",
+      "docs/audit_report.json"
+    ]
+  }
 }

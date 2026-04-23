@@ -1,0 +1,167 @@
+{
+  "audit_date_utc": "2026-04-23T00:00:00Z",
+  "branch": "varlen-fa2",
+  "head": {
+    "hash": "714eec7",
+    "message": "rewrite varlen_fwd to CUTE-tile kernel structure"
+  },
+  "result": {
+    "status": "pass_with_risks",
+    "score": 81,
+    "gate": {
+      "p0_must_be_zero": true,
+      "p0_count": 0,
+      "passed": true
+    },
+    "counts": {
+      "P1": 4,
+      "P2": 6,
+      "INFO": 2
+    }
+  },
+  "findings": [
+    {
+      "id": "DOC-001",
+      "severity": "P1",
+      "title": "AGENTS test command may not execute pytest cases",
+      "evidence": [
+        "AGENTS.md:21",
+        "tests/test_flash_attn_correctness.py"
+      ],
+      "impact": "Can produce false-positive verification.",
+      "recommendation": "Use python3 -m pytest -q tests/test_flash_attn_correctness.py"
+    },
+    {
+      "id": "DOC-002",
+      "severity": "P1",
+      "title": "Status snapshot stale vs current HEAD",
+      "evidence": [
+        "docs/STATUS.md:3",
+        "docs/status.json",
+        "git log -1 => 714eec7"
+      ],
+      "impact": "Handoff/debugging context can be outdated.",
+      "recommendation": "Update STATUS.md and status.json together whenever reporting status."
+    },
+    {
+      "id": "DOC-003",
+      "severity": "P1",
+      "title": "Invalid NANOVLLM_FA2_MODE can be swallowed by fallback",
+      "evidence": [
+        "nanovllm/layers/prefill_attention.py:675-689",
+        "docs/varlen_api_design.md:17"
+      ],
+      "impact": "Typos/config errors may silently degrade to other backend.",
+      "recommendation": "Do not fallback on mode-validation errors."
+    },
+    {
+      "id": "DOC-004",
+      "severity": "P1",
+      "title": "Debug assert may be bypassed when fallback is enabled",
+      "evidence": [
+        "nanovllm/layers/prefill_attention.py:345,470,676-689",
+        "docs/varlen_api_design.md:26,29,37,40"
+      ],
+      "impact": "Numerical regressions may be hidden in debug modes.",
+      "recommendation": "Disable fallback for *_debug or re-raise AssertionError."
+    },
+    {
+      "id": "DOC-005",
+      "severity": "P2",
+      "title": "NVTX include pattern inconsistent across docs",
+      "evidence": [
+        "README.md:62,70",
+        "docs/test.md:75,83"
+      ],
+      "impact": "NCU filtering reproducibility reduced.",
+      "recommendation": "Use one canonical include pattern."
+    },
+    {
+      "id": "DOC-006",
+      "severity": "P2",
+      "title": "python/python3 command prefix inconsistent",
+      "evidence": [
+        "AGENTS.md:18-21",
+        "README.md:25,33,53",
+        "docs/test.md:51-61"
+      ],
+      "impact": "Interpreter drift risk across environments.",
+      "recommendation": "Standardize command prefix convention in all docs."
+    },
+    {
+      "id": "DOC-007",
+      "severity": "P2",
+      "title": "docs/test overstates varlen API dtype validation",
+      "evidence": [
+        "docs/test.md:13",
+        "tests/test_varlen_api_contract.py"
+      ],
+      "impact": "Coverage confidence may be overstated.",
+      "recommendation": "Either add dtype negative tests or narrow doc claim."
+    },
+    {
+      "id": "DOC-008",
+      "severity": "P2",
+      "title": "docs/test under-describes existing varlen GQA/negative coverage",
+      "evidence": [
+        "docs/test.md:14",
+        "tests/test_varlen_man_correctness.py:234,285,334"
+      ],
+      "impact": "Coverage map lacks important details.",
+      "recommendation": "Add GQA and unsupported head_dim notes to docs/test.md."
+    },
+    {
+      "id": "DOC-009",
+      "severity": "P2",
+      "title": "batch_man correctness file lacks direct GQA/MQA coverage",
+      "evidence": [
+        "tests/test_batch_man_correctness.py",
+        "tests/test_prefill_attention_batch_view.py"
+      ],
+      "impact": "Potential gap if batch_man behavior changes for q_heads != kv_heads.",
+      "recommendation": "Add explicit GQA/MQA correctness cases or document unsupported scope."
+    },
+    {
+      "id": "DOC-010",
+      "severity": "P2",
+      "title": "block_table 'required' wording diverges from runtime normalization",
+      "evidence": [
+        "nanovllm/layers/prefill_attention.py:538-539",
+        "docs/varlen_api_design.md:20-21,115-116"
+      ],
+      "impact": "API expectation ambiguity for callers.",
+      "recommendation": "Document that None is normalized to empty block_table or enforce strict non-None."
+    },
+    {
+      "id": "DOC-011",
+      "severity": "INFO",
+      "title": "Test inventory count matches",
+      "evidence": [
+        "docs/test.md",
+        "python3 -m pytest -q tests --collect-only => 137"
+      ],
+      "impact": "Inventory sync is currently healthy.",
+      "recommendation": "Keep inventory updated when adding/removing test files."
+    },
+    {
+      "id": "DOC-012",
+      "severity": "INFO",
+      "title": "Mode matrix/default routing mostly aligned",
+      "evidence": [
+        "docs/varlen_api_design.md:82-85",
+        "nanovllm/layers/prefill_attention.py:551-558,591-675"
+      ],
+      "impact": "Core routing semantics are predictable.",
+      "recommendation": "Keep docs and code synced on fallback/debug caveats."
+    }
+  ],
+  "method": {
+    "subagents": 4,
+    "checks": [
+      "docs cross-consistency",
+      "tests coverage mapping",
+      "runtime-doc alignment",
+      "command/path static validation"
+    ]
+  }
+}
