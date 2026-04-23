@@ -43,3 +43,4 @@ Last updated (UTC): 2026-04-23T00:00:00Z
 ---
 Update rule:
 - Keep `docs/STATUS.md` (human) and `docs/status.json` (agent) aligned in the same commit.
+- Treat status as a snapshot contract: if a change updates milestones, risks, next actions, or reported commit baseline, refresh both files in that same commit.

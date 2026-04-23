@@ -61,5 +61,6 @@
       "docs/audit_report.md",
       "docs/audit_report.json"
     ]
-  }
+  },
+  "update_policy": "If milestones, risks, next_actions, or reported commit baseline change, update docs/STATUS.md and docs/status.json together in the same commit."
 }

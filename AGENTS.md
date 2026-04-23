@@ -18,7 +18,7 @@ Native CUDA experiments are in `gemm_project/csrc/`. Vendored dependencies live 
 - `python -m pip install -e .` installs the project in editable mode.
 - `python example.py` runs a local generation smoke test (requires a local model path update).
 - `python bench.py` runs benchmark code.
-- `python tests/test_flash_attn_correctness.py` runs the current flash-attention correctness check.
+- `python3 -m pytest -q tests/test_flash_attn_correctness.py` runs the current flash-attention correctness check.
 
 Use a CUDA-enabled environment with compatible `torch`, `triton`, and `flash-attn` versions (see `pyproject.toml` and `.devcontainer/Dockerfile`).
 
@@ -51,6 +51,7 @@ Use a CUDA-enabled environment with compatible `torch`, `triton`, and `flash-att
 - Default behavior: implement requested changes end-to-end, verify with focused tests, then commit.
 - If the worktree contains unrelated dirty files, do not revert them; commit only files relevant to the completed task.
 - Use one logical commit per task completion; avoid mixing unrelated changes.
+- Keep status snapshots fresh: when reporting/changing project status, update `docs/STATUS.md` and `docs/status.json` together in the same commit.
 
 ## Security & Configuration Tips
 - Do not commit model weights, secrets, or local absolute paths.
