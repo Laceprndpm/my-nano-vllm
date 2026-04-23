@@ -1,11 +1,11 @@
 # Project Status
 
-Last updated (UTC): 2026-04-23T01:30:00Z
+Last updated (UTC): 2026-04-23T02:10:00Z
 
 ## Snapshot
-- Branch: `varlen-fa2`
-- Latest commit: `ee1d515` (`set default TORCH_CUDA_ARCH_LIST for RTX 4060`)
-- Previous commit: `45021ca` (`tighten fa2 fallback semantics and debug hard-fail`)
+- Branch: `main`
+- Latest commit: `8b8b21b` (`polish release docs before merging varlen-fa2`)
+- Previous commit: `ee1d515` (`set default TORCH_CUDA_ARCH_LIST for RTX 4060`)
 
 ## Completed Milestones
 - Added FA2 runtime mode switch (`NANOVLLM_FA2_MODE`) with:

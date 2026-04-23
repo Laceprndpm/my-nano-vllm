@@ -1,11 +1,15 @@
 {
-  "timestamp_utc": "2026-04-23T01:30:00Z",
-  "branch": "varlen-fa2",
+  "timestamp_utc": "2026-04-23T02:10:00Z",
+  "branch": "main",
   "latest_commit": {
-    "hash": "ee1d515",
-    "message": "set default TORCH_CUDA_ARCH_LIST for RTX 4060"
+    "hash": "8b8b21b",
+    "message": "polish release docs before merging varlen-fa2"
   },
   "recent_commits": [
+    {
+      "hash": "8b8b21b",
+      "message": "polish release docs before merging varlen-fa2"
+    },
     {
       "hash": "ee1d515",
       "message": "set default TORCH_CUDA_ARCH_LIST for RTX 4060"
@@ -13,10 +17,6 @@
     {
       "hash": "45021ca",
       "message": "tighten fa2 fallback semantics and debug hard-fail"
-    },
-    {
-      "hash": "6c2e291",
-      "message": "fix doc test command and status snapshot policy"
     }
   ],
   "runtime_modes": {
