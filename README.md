@@ -27,6 +27,8 @@ python3 -m pip install -e .
 
 Use a CUDA-enabled environment with compatible `torch`, `triton`, and `flash-attn`.
 
+For RTX 4060 (sm_89), this repo now defaults `TORCH_CUDA_ARCH_LIST=8.9` when loading the local CUDA extension if the variable is unset. You can still override it explicitly.
+
 ## Quick Start
 
 ```bash
@@ -59,7 +61,7 @@ Enable NVTX only when needed:
 
 ```bash
 NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_man \
-ncu --target-processes all --nvtx --nvtx-include "prefill.batch_man/" \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_man" \
 python3 example.py
 ```
 
@@ -67,7 +69,7 @@ For the official batch path:
 
 ```bash
 NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_official \
-ncu --target-processes all --nvtx --nvtx-include "prefill.batch_official/" \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_official" \
 python3 example.py
 ```
 
@@ -77,3 +79,7 @@ python3 example.py
 - The handwritten **varlen** kernel path is implemented (minimal kernel) with current constraints:
   - `head_dim in {64, 128}`
   - max sequence length alignment hotfix is applied in Python when needed
+- Fallback policy for `cuda_fa2` routing:
+  - fallback applies to runtime backend execution errors (`RuntimeError`) only
+  - invalid mode / validation errors fail fast (no fallback)
+  - `batch_debug` / `varlen_debug` do not fallback on mismatches

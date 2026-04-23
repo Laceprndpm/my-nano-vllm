@@ -1,11 +1,11 @@
 # Project Status
 
-Last updated (UTC): 2026-04-23T00:00:00Z
+Last updated (UTC): 2026-04-23T01:30:00Z
 
 ## Snapshot
 - Branch: `varlen-fa2`
-- Latest commit: `714eec7` (`rewrite varlen_fwd to CUTE-tile kernel structure`)
-- Previous commit: `336d3dd` (`extract reusable flash helpers into common tools`)
+- Latest commit: `ee1d515` (`set default TORCH_CUDA_ARCH_LIST for RTX 4060`)
+- Previous commit: `45021ca` (`tighten fa2 fallback semantics and debug hard-fail`)
 
 ## Completed Milestones
 - Added FA2 runtime mode switch (`NANOVLLM_FA2_MODE`) with:
@@ -14,6 +14,12 @@ Last updated (UTC): 2026-04-23T00:00:00Z
 - Handwritten batch-view path (`batch_man`) and handwritten varlen path (`varlen_man`) are both wired through torch extension.
 - Added debug compare modes (`batch_debug`, `varlen_debug`) and focused correctness/routing tests.
 - Fixed varlen GQA head mapping bug (`q_head -> kv_head`) in handwritten varlen kernel.
+- Tightened fallback semantics:
+  - fallback now applies only to runtime backend execution errors (`RuntimeError`)
+  - invalid mode / validation errors no longer fallback
+  - `batch_debug` / `varlen_debug` mismatches always hard-fail
+- Added default arch behavior for extension loading on this workstation:
+  - if `TORCH_CUDA_ARCH_LIST` is unset, default to `8.9` (RTX 4060)
 
 ## Temporary Hotfix (Current)
 - `batch_man` now applies Python-side per-sequence pad-to-64 before calling handwritten kernel.
@@ -31,6 +37,11 @@ Last updated (UTC): 2026-04-23T00:00:00Z
 ## Next Actions
 1. Replace Python align/pad hotfixes with kernel-level boundary/predicate fixes.
 2. Continue expanding correctness coverage (dtype/head_dim/shape/GQA) and keep `docs/test.md` in sync.
+3. Prepare merge-to-main notes after final mode verification (completed on this branch).
+
+## Validation Snapshot
+- Mode test status: completed, no semantic collapse observed in final mode checks.
+- Pytest status: `143 passed` on `python3 -m pytest -q tests`.
 
 ## Audit Snapshot (2026-04-23)
 - Added audit artifacts:

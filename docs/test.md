@@ -6,7 +6,7 @@ This file tracks the FA2-related test suites and what they validate.
 
 | Test file | Category | Key checks |
 |---|---|---|
-| `tests/test_prefill_attention_mode_routing.py` | Routing / mode switch | `NANOVLLM_FA2_MODE` dispatch for `varlen_official`, `varlen_man`, `varlen_debug`, `batch_official`, `batch_man`, `batch_debug`; varlen block_table normalization contract |
+| `tests/test_prefill_attention_mode_routing.py` | Routing / mode switch | `NANOVLLM_FA2_MODE` dispatch for `varlen_official`, `varlen_man`, `varlen_debug`, `batch_official`, `batch_man`, `batch_debug`; varlen block_table normalization; fallback boundary checks (invalid mode no-fallback, runtime error fallback on/off, debug no-fallback) |
 | `tests/test_batch_man_correctness.py` | Batch-man correctness | handwritten batch kernel vs SDPA across shape matrix, dtype matrix (`fp16`/`bf16`) |
 | `tests/test_batch_debug_mode.py` | Batch-debug behavior | debug mode runs `batch_man` + `batch_official`, returns man output on close match, raises on diff, rejects non-empty `block_table` |
 | `tests/test_varlen_debug_mode.py` | Varlen-debug behavior | debug mode runs `varlen_man` + `varlen_official`, returns man output on close match, raises on diff/shape mismatch, and validates varlen_debug mode dispatch |
@@ -39,6 +39,9 @@ This file tracks the FA2-related test suites and what they validate.
 - Varlen-man kernel matches reference on dense/paged paths across fp16/bf16
 - Causal masking blocks future-token influence in batch-view flow
 - Mode routing chooses the intended implementation branch
+- Invalid/typo mode raises directly (no fallback), even when fallback switch is enabled
+- Runtime backend `RuntimeError` falls back only when fallback switch is enabled
+- Debug mode runtime/assertion failures do not fallback (`batch_debug`/`varlen_debug` hard-fail)
 - batch_man temporary pad64 hotfix emits warning on unaligned shapes
 - varlen_man temporary max-seqlen align hotfix emits warning on unaligned shapes
 - batch_debug compares handwritten and official batch outputs and fails fast on mismatch

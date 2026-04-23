@@ -32,9 +32,9 @@ This backlog tracks test-suite cleanup and coverage hardening for FA2 modes and 
 ### P0-3: Extend routing negative-path tests
 - Priority: P0
 - Owner: TBD
-- Status: TODO
-- Why: routing tests mainly check happy-path dispatch and miss fallback/error branches.
-- Exit Condition: tests cover unsupported mode behavior and fallback on/off branches explicitly.
+- Status: DONE
+- Why: fallback semantics were tightened; regression coverage now includes unsupported mode, runtime error fallback on/off, and debug no-fallback boundaries.
+- Exit Condition: Satisfied (`tests/test_prefill_attention_mode_routing.py` now covers unsupported mode behavior and fallback on/off branches explicitly).
 
 ### P1-1: Split batch-view mixed-responsibility tests
 - Priority: P1
