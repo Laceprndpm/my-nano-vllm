@@ -77,7 +77,7 @@ Profile handwritten batch path only:
 
 ```bash
 NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_man \
-ncu --target-processes all --nvtx --nvtx-include "prefill.batch_man.fa2_call" \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_man.fa2_call/" \
 python3 example.py
 ```
 
@@ -85,7 +85,7 @@ Profile official batch path only:
 
 ```bash
 NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_official \
-ncu --target-processes all --nvtx --nvtx-include "prefill.batch_official.fa2_call" \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_official.fa2_call/" \
 python3 example.py
 ```
 
@@ -93,6 +93,6 @@ Profile handwritten varlen path only:
 
 ```bash
 NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=varlen_man \
-ncu --target-processes all --nvtx --nvtx-include "prefill.varlen_man.fa2_call" \
+ncu --target-processes all --nvtx --nvtx-include "prefill.varlen_man.fa2_call/" \
 python3 example.py
 ```
