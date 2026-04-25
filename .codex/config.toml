@@ -1,0 +1,12 @@
+model = "gpt-5.3-codex"
+personality = "pragmatic"
+
+approval_policy = "on-request"
+sandbox_mode = "danger-full-access"
+
+[features]
+multi_agent = true
+
+[agents.HRagent]
+description = "HR role with repository-wide read access and write access only under note/*."
+config_file = "agents/HRagent.toml"
