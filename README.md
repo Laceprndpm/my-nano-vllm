@@ -83,6 +83,28 @@ ncu --target-processes all --nvtx --nvtx-include "prefill.varlen_man.fa2_call/" 
 python3 example.py
 ```
 
+Detailed profile for one representative launch (`id=1`, `--set full`):
+
+```bash
+NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=varlen_man \
+ncu --set full --target-processes all --nvtx \
+--nvtx-include "prefill.varlen_man.fa2_call/" \
+--launch-skip 1 --launch-count 1 \
+-o reports/varlen_man_id1_full \
+python3 example.py
+```
+
+Fast full-window scan across all matching launches (`--set basic`):
+
+```bash
+NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=varlen_man \
+ncu --set basic --target-processes all --nvtx \
+--nvtx-include "prefill.varlen_man.fa2_call/" \
+--launch-count 0 \
+-o reports/varlen_man_all_basic \
+python3 example.py
+```
+
 ## Notes
 
 - The handwritten **batch** kernel path is implemented and tested.
