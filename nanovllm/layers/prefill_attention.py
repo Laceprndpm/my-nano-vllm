@@ -202,29 +202,29 @@ def _run_cuda_batch_fa2_official(
     causal: bool,
 ) -> torch.Tensor:
     """官方 batch-view 路径：在 batch 视图下调用 flash-attn FA2 进行前向。"""
-    with _nvtx_range("prefill.batch_official"):
-        padded = _varlen_to_padded(
-            q,
-            k,
-            v,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_k=cu_seqlens_k,
-            max_seqlen_q=max_seqlen_q,
-            max_seqlen_k=max_seqlen_k,
-        )
-        _attn_mask = _build_padded_attention_mask(padded.q_valid, padded.k_valid, causal)
+    padded = _varlen_to_padded(
+        q,
+        k,
+        v,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+    )
+    _attn_mask = _build_padded_attention_mask(padded.q_valid, padded.k_valid, causal)
 
-        q_pad = padded.q_pad * padded.q_valid.unsqueeze(-1).unsqueeze(-1).to(padded.q_pad.dtype)
-        k_pad = padded.k_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.k_pad.dtype)
-        v_pad = padded.v_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.v_pad.dtype)
-        out_pad = torch.zeros_like(q_pad)
+    q_pad = padded.q_pad * padded.q_valid.unsqueeze(-1).unsqueeze(-1).to(padded.q_pad.dtype)
+    k_pad = padded.k_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.k_pad.dtype)
+    v_pad = padded.v_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.v_pad.dtype)
+    out_pad = torch.zeros_like(q_pad)
 
-        for b, (ql, kl) in enumerate(zip(padded.q_lens, padded.k_lens)):
-            if ql == 0 or kl == 0:
-                continue
-            q_b = q_pad[b:b + 1, :ql]
-            k_b = k_pad[b:b + 1, :kl]
-            v_b = v_pad[b:b + 1, :kl]
+    for b, (ql, kl) in enumerate(zip(padded.q_lens, padded.k_lens)):
+        if ql == 0 or kl == 0:
+            continue
+        q_b = q_pad[b:b + 1, :ql]
+        k_b = k_pad[b:b + 1, :kl]
+        v_b = v_pad[b:b + 1, :kl]
+        with _nvtx_range("prefill.batch_official.fa2_call"):
             out_b = flash_attn_func(
                 q_b,
                 k_b,
@@ -232,11 +232,11 @@ def _run_cuda_batch_fa2_official(
                 softmax_scale=softmax_scale,
                 causal=causal,
             )
-            out_pad[b:b + 1, :ql] = out_b
+        out_pad[b:b + 1, :ql] = out_b
 
-        out_pad = out_pad * padded.q_valid.unsqueeze(-1).unsqueeze(-1).to(out_pad.dtype)
-        out_pad = out_pad.masked_fill(~_attn_mask.any(dim=-1).unsqueeze(-1).unsqueeze(-1), 0)
-        return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
+    out_pad = out_pad * padded.q_valid.unsqueeze(-1).unsqueeze(-1).to(out_pad.dtype)
+    out_pad = out_pad.masked_fill(~_attn_mask.any(dim=-1).unsqueeze(-1).unsqueeze(-1), 0)
+    return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
 
 
 def _run_cuda_batch_fa2_man(
@@ -253,39 +253,39 @@ def _run_cuda_batch_fa2_man(
 ) -> torch.Tensor:
     """手写 CUDA batch-view 路径：逐序列调用 torch bind 自写 kernel。"""
     global _BATCH_MAN_PAD64_WARNING_EMITTED
-    with _nvtx_range("prefill.batch_man"):
-        padded = _varlen_to_padded(
-            q,
-            k,
-            v,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_k=cu_seqlens_k,
-            max_seqlen_q=max_seqlen_q,
-            max_seqlen_k=max_seqlen_k,
-        )
-        q_pad = padded.q_pad * padded.q_valid.unsqueeze(-1).unsqueeze(-1).to(padded.q_pad.dtype)
-        k_pad = padded.k_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.k_pad.dtype)
-        v_pad = padded.v_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.v_pad.dtype)
-        out_pad = torch.zeros_like(q_pad)
-        for b, (ql, kl) in enumerate(zip(padded.q_lens, padded.k_lens)):
-            if ql == 0 or kl == 0:
-                continue
-            ql_pad = ((ql + 63) // 64) * 64
-            kl_pad = ((kl + 63) // 64) * 64
-            if (ql_pad != ql or kl_pad != kl) and not _BATCH_MAN_PAD64_WARNING_EMITTED:
-                warnings.warn(
-                    "[WARNING][FA2_BATCH_MAN_PAD64] batch_man kernel currently requires 64-aligned "
-                    "seqlen for stable numerics; applying temporary Python-side pad-to-64 hotfix.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                _BATCH_MAN_PAD64_WARNING_EMITTED = True
-            q_b = torch.zeros((1, ql_pad, q_pad.size(2), q_pad.size(3)), dtype=q_pad.dtype, device=q_pad.device)
-            k_b = torch.zeros((1, kl_pad, k_pad.size(2), k_pad.size(3)), dtype=k_pad.dtype, device=k_pad.device)
-            v_b = torch.zeros((1, kl_pad, v_pad.size(2), v_pad.size(3)), dtype=v_pad.dtype, device=v_pad.device)
-            q_b[:, :ql] = q_pad[b:b + 1, :ql]
-            k_b[:, :kl] = k_pad[b:b + 1, :kl]
-            v_b[:, :kl] = v_pad[b:b + 1, :kl]
+    padded = _varlen_to_padded(
+        q,
+        k,
+        v,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+    )
+    q_pad = padded.q_pad * padded.q_valid.unsqueeze(-1).unsqueeze(-1).to(padded.q_pad.dtype)
+    k_pad = padded.k_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.k_pad.dtype)
+    v_pad = padded.v_pad * padded.k_valid.unsqueeze(-1).unsqueeze(-1).to(padded.v_pad.dtype)
+    out_pad = torch.zeros_like(q_pad)
+    for b, (ql, kl) in enumerate(zip(padded.q_lens, padded.k_lens)):
+        if ql == 0 or kl == 0:
+            continue
+        ql_pad = ((ql + 63) // 64) * 64
+        kl_pad = ((kl + 63) // 64) * 64
+        if (ql_pad != ql or kl_pad != kl) and not _BATCH_MAN_PAD64_WARNING_EMITTED:
+            warnings.warn(
+                "[WARNING][FA2_BATCH_MAN_PAD64] batch_man kernel currently requires 64-aligned "
+                "seqlen for stable numerics; applying temporary Python-side pad-to-64 hotfix.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            _BATCH_MAN_PAD64_WARNING_EMITTED = True
+        q_b = torch.zeros((1, ql_pad, q_pad.size(2), q_pad.size(3)), dtype=q_pad.dtype, device=q_pad.device)
+        k_b = torch.zeros((1, kl_pad, k_pad.size(2), k_pad.size(3)), dtype=k_pad.dtype, device=k_pad.device)
+        v_b = torch.zeros((1, kl_pad, v_pad.size(2), v_pad.size(3)), dtype=v_pad.dtype, device=v_pad.device)
+        q_b[:, :ql] = q_pad[b:b + 1, :ql]
+        k_b[:, :kl] = k_pad[b:b + 1, :kl]
+        v_b[:, :kl] = v_pad[b:b + 1, :kl]
+        with _nvtx_range("prefill.batch_man.fa2_call"):
             out_lse = torch_ext_fa2_batch_fwd(
                 q_b,
                 k_b,
@@ -293,9 +293,9 @@ def _run_cuda_batch_fa2_man(
                 causal=causal,
                 softmax_scale=float(softmax_scale),
             )
-            out_b = out_lse[0] if isinstance(out_lse, (tuple, list)) else out_lse
-            out_pad[b:b + 1, :ql] = out_b[:, :ql]
-        return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
+        out_b = out_lse[0] if isinstance(out_lse, (tuple, list)) else out_lse
+        out_pad[b:b + 1, :ql] = out_b[:, :ql]
+    return _padded_to_varlen(out_pad, padded.q_lens, cu_seqlens_q)
 
 
 def _run_cuda_batch_fa2_debug(
@@ -366,18 +366,19 @@ def _run_cuda_varlen_fa2_official(
     causal: bool,
 ) -> torch.Tensor:
     """官方 varlen 路径：调用 flash-attn varlen 参考实现。"""
-    return torch_ext_fa2_varlen_fwd_official(
-        q,
-        k,
-        v,
-        cu_seqlens_q=cu_seqlens_q,
-        cu_seqlens_k=cu_seqlens_k,
-        max_seqlen_q=max_seqlen_q,
-        max_seqlen_k=max_seqlen_k,
-        block_table=block_table,
-        causal=causal,
-        softmax_scale=float(softmax_scale),
-    )
+    with _nvtx_range("prefill.varlen_official.fa2_call"):
+        return torch_ext_fa2_varlen_fwd_official(
+            q,
+            k,
+            v,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_k=cu_seqlens_k,
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_k=max_seqlen_k,
+            block_table=block_table,
+            causal=causal,
+            softmax_scale=float(softmax_scale),
+        )
 
 
 def _run_cuda_varlen_fa2_man(
@@ -406,18 +407,19 @@ def _run_cuda_varlen_fa2_man(
         )
         _VARLEN_MAN_PAD64_WARNING_EMITTED = True
 
-    return torch_ext_fa2_varlen_fwd_man(
-        q,
-        k,
-        v,
-        max_seqlen_q=aligned_max_seqlen_q,
-        cu_seqlens_q=cu_seqlens_q,
-        max_seqlen_k=aligned_max_seqlen_k,
-        cu_seqlens_k=cu_seqlens_k,
-        block_table=block_table,
-        softmax_scale=softmax_scale,
-        causal=causal,
-    )
+    with _nvtx_range("prefill.varlen_man.fa2_call"):
+        return torch_ext_fa2_varlen_fwd_man(
+            q,
+            k,
+            v,
+            max_seqlen_q=aligned_max_seqlen_q,
+            cu_seqlens_q=cu_seqlens_q,
+            max_seqlen_k=aligned_max_seqlen_k,
+            cu_seqlens_k=cu_seqlens_k,
+            block_table=block_table,
+            softmax_scale=softmax_scale,
+            causal=causal,
+        )
 
 
 def _run_cuda_varlen_fa2_debug(

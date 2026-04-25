@@ -16,8 +16,10 @@ The goal of this project is to keep the lightweight nano-vllm runtime while iter
   - `batch_debug` (run official + manual and assert diff)
 - Handwritten CUDA extension entry points under `nanovllm/csrc/fa2`.
 - CUDA profiling support with optional NVTX ranges:
-  - `prefill.batch_official`
-  - `prefill.batch_man`
+  - `prefill.batch_official.fa2_call`
+  - `prefill.batch_man.fa2_call`
+  - `prefill.varlen_official.fa2_call`
+  - `prefill.varlen_man.fa2_call`
 
 ## Installation
 
@@ -61,7 +63,7 @@ Enable NVTX only when needed:
 
 ```bash
 NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_man \
-ncu --target-processes all --nvtx --nvtx-include "prefill.batch_man" \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_man.fa2_call" \
 python3 example.py
 ```
 
@@ -69,7 +71,15 @@ For the official batch path:
 
 ```bash
 NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=batch_official \
-ncu --target-processes all --nvtx --nvtx-include "prefill.batch_official" \
+ncu --target-processes all --nvtx --nvtx-include "prefill.batch_official.fa2_call" \
+python3 example.py
+```
+
+For handwritten varlen path:
+
+```bash
+NANOVLLM_NVTX=1 NANOVLLM_FA2_MODE=varlen_man \
+ncu --target-processes all --nvtx --nvtx-include "prefill.varlen_man.fa2_call" \
 python3 example.py
 ```
 
