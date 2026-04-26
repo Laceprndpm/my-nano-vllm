@@ -49,16 +49,16 @@ def load_cuda_fa2_extension():
         "-U__CUDA_NO_HALF_CONVERSIONS__",
         "-U__CUDA_NO_HALF2_OPERATORS__",
         "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
-        "-gencode",
-        "arch=compute_80,code=sm_80",
+        # "-gencode",
+        # "arch=compute_80,code=sm_80",
     ]
-    if CUDA_HOME:
-        try:
-            raw = subprocess.check_output([os.path.join(CUDA_HOME, "bin", "nvcc"), "-V"], text=True)
-            if "release 11.8" in raw or "release 12." in raw:
-                cuda_flags += ["-gencode", "arch=compute_90,code=sm_90"]
-        except Exception:
-            pass
+    # if CUDA_HOME:
+    #     try:
+    #         raw = subprocess.check_output([os.path.join(CUDA_HOME, "bin", "nvcc"), "-V"], text=True)
+    #         if "release 11.8" in raw or "release 12." in raw:
+    #             cuda_flags += ["-gencode", "arch=compute_90,code=sm_90"]
+    #     except Exception:
+    #         pass
     return load(
         name="nanovllm_fa2_ext",
         sources=[cpp_path, cu_path, core_cu, varlen_cu],
